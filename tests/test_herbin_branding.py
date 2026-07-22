@@ -76,6 +76,8 @@ def main() -> None:
     assert "fn MacActivateApplicationAtPoint" in macos_rs
     assert "pub fn activate_application_at_point" in macos_rs
     assert 'bundleIdentifier isEqualToString:@"com.apple.dock"' in macos_mm
+    assert "kCGWindowLayer" in macos_mm
+    assert "layer.intValue != 0" in macos_mm
     assert "NSApplicationActivationPolicyRegular" in macos_mm
     assert "activateWithOptions" in macos_mm
     required_window_activation_markers = (
