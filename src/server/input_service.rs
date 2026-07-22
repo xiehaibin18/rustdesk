@@ -1056,6 +1056,20 @@ pub fn handle_mouse_(
     }
 }
 
+#[cfg(target_os = "macos")]
+fn trace_rdh_window_state(phase: &str, conn: i32, x: i32, y: i32) {
+    let snapshot = crate::platform::macos::window_activation_debug_snapshot(x, y);
+    log::info!(
+        "[rdh-window-debug] phase={} conn={} x={} y={} frontmost_pid={} target_pid={}",
+        phase,
+        conn,
+        x,
+        y,
+        snapshot.frontmost_pid,
+        snapshot.target_pid,
+    );
+}
+
 pub fn handle_mouse_simulation_(evt: &MouseEvent, conn: i32) {
     if !active_mouse_(conn) {
         return;
@@ -1135,19 +1149,25 @@ pub fn handle_mouse_simulation_(evt: &MouseEvent, conn: i32) {
         MOUSE_TYPE_DOWN => match buttons {
             MOUSE_BUTTON_LEFT => {
                 #[cfg(target_os = "macos")]
-                if let Some((x, y)) = crate::get_cursor_pos() {
+                let click_position = crate::get_cursor_pos();
+                #[cfg(target_os = "macos")]
+                if let Some((x, y)) = click_position {
+                    trace_rdh_window_state("before_activation", conn, x, y);
                     let activation_result =
                         crate::platform::macos::activate_application_at_point(x, y);
-                    if activation_result < 0 {
-                        log::debug!(
-                            "Failed to activate the macOS application at ({}, {}), pid={}",
-                            x,
-                            y,
-                            -activation_result,
-                        );
-                    }
+                    log::info!(
+                        "[rdh-window-debug] phase=activation_returned conn={} x={} y={} result={}",
+                        conn,
+                        x,
+                        y,
+                        activation_result,
+                    );
                 }
                 allow_err!(en.mouse_down(MouseButton::Left));
+                #[cfg(target_os = "macos")]
+                if let Some((x, y)) = click_position {
+                    trace_rdh_window_state("after_down", conn, x, y);
+                }
             }
             MOUSE_BUTTON_RIGHT => {
                 allow_err!(en.mouse_down(MouseButton::Right));
@@ -1166,6 +1186,16 @@ pub fn handle_mouse_simulation_(evt: &MouseEvent, conn: i32) {
         MOUSE_TYPE_UP => match buttons {
             MOUSE_BUTTON_LEFT => {
                 en.mouse_up(MouseButton::Left);
+                #[cfg(target_os = "macos")]
+                if let Some((x, y)) = crate::get_cursor_pos() {
+                    trace_rdh_window_state("after_up", conn, x, y);
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_millis(150));
+                        trace_rdh_window_state("settled_150ms", conn, x, y);
+                        thread::sleep(Duration::from_millis(450));
+                        trace_rdh_window_state("settled_600ms", conn, x, y);
+                    });
+                }
             }
             MOUSE_BUTTON_RIGHT => {
                 en.mouse_up(MouseButton::Right);

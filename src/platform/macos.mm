@@ -2,6 +2,8 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <IOKit/hidsystem/IOHIDLib.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <Security/Authorization.h>
 #include <Security/AuthorizationTags.h>
 
@@ -169,6 +171,54 @@ static int32_t MacWindowOwnerPidAtPoint(double x, double y) {
     }
 }
 
+extern "C" int32_t MacDebugFrontmostApplicationPid() {
+    return MacFrontmostApplicationPid();
+}
+
+extern "C" int32_t MacDebugWindowOwnerPidAtPoint(double x, double y) {
+    return MacWindowOwnerPidAtPoint(x, y);
+}
+
+static void MacAppendWindowActivationTrace(
+    double x,
+    double y,
+    int32_t targetPid,
+    int32_t frontmostBefore,
+    bool hasTargetWindow,
+    bool shouldRaiseWindow,
+    bool activationCalled,
+    bool activationSucceeded,
+    int32_t frontmostAfterActivation,
+    AXError raiseError,
+    int32_t frontmostAfterRaise
+) {
+    FILE *stream = fopen("/tmp/rdh-window-activation.log", "a");
+    if (stream == NULL) {
+        return;
+    }
+    fprintf(
+        stream,
+        "time=%.6f process=%d trusted=%d x=%.1f y=%.1f target=%d "
+        "frontmost_before=%d ax_window=%d should_raise=%d activation_called=%d "
+        "activation_ok=%d frontmost_after_activation=%d raise_error=%d "
+        "frontmost_after_raise=%d\n",
+        CFAbsoluteTimeGetCurrent(),
+        getpid(),
+        AXIsProcessTrusted(),
+        x,
+        y,
+        targetPid,
+        frontmostBefore,
+        hasTargetWindow,
+        shouldRaiseWindow,
+        activationCalled,
+        activationSucceeded,
+        frontmostAfterActivation,
+        raiseError,
+        frontmostAfterRaise);
+    fclose(stream);
+}
+
 static AXUIElementRef MacAccessibilityWindowAtPoint(double x, double y, pid_t expectedPid) {
     AXUIElementRef systemWide = AXUIElementCreateSystemWide();
     if (systemWide == NULL) {
@@ -274,15 +324,31 @@ extern "C" int32_t MacActivateApplicationAtPoint(double x, double y) {
         int32_t frontmostPid = MacFrontmostApplicationPid();
 
         bool activationSucceeded = true;
+        bool activationCalled = false;
         if (targetPid != frontmostPid) {
+            activationCalled = true;
             activationSucceeded =
                 [application activateWithOptions:(NSApplicationActivationOptions)0];
         }
+        int32_t frontmostAfterActivation = MacFrontmostApplicationPid();
 
         AXError raiseError = kAXErrorSuccess;
         if (shouldRaiseWindow) {
             raiseError = AXUIElementPerformAction(targetWindow, kAXRaiseAction);
         }
+        int32_t frontmostAfterRaise = MacFrontmostApplicationPid();
+        MacAppendWindowActivationTrace(
+            x,
+            y,
+            targetPid,
+            frontmostPid,
+            targetWindow != NULL,
+            shouldRaiseWindow,
+            activationCalled,
+            activationSucceeded,
+            frontmostAfterActivation,
+            raiseError,
+            frontmostAfterRaise);
         if (targetWindow != NULL) {
             CFRelease(targetWindow);
         }

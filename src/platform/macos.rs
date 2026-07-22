@@ -69,6 +69,8 @@ extern "C" {
     fn CanUseNewApiForScreenCaptureCheck() -> BOOL;
     fn MacCheckAdminAuthorization() -> BOOL;
     fn MacActivateApplicationAtPoint(x: f64, y: f64) -> i32;
+    fn MacDebugFrontmostApplicationPid() -> i32;
+    fn MacDebugWindowOwnerPidAtPoint(x: f64, y: f64) -> i32;
     fn MacGetModeNum(display: u32, numModes: *mut u32) -> BOOL;
     fn MacGetModes(
         display: u32,
@@ -91,6 +93,21 @@ pub fn major_version() -> u32 {
 
 pub fn activate_application_at_point(x: i32, y: i32) -> i32 {
     autoreleasepool(|| unsafe { MacActivateApplicationAtPoint(x as f64, y as f64) })
+}
+
+#[derive(Clone, Copy)]
+pub struct WindowActivationDebugSnapshot {
+    pub frontmost_pid: i32,
+    pub target_pid: i32,
+}
+
+pub fn window_activation_debug_snapshot(x: i32, y: i32) -> WindowActivationDebugSnapshot {
+    autoreleasepool(|| unsafe {
+        WindowActivationDebugSnapshot {
+            frontmost_pid: MacDebugFrontmostApplicationPid(),
+            target_pid: MacDebugWindowOwnerPidAtPoint(x as f64, y as f64),
+        }
+    })
 }
 
 pub fn is_process_trusted(prompt: bool) -> bool {
