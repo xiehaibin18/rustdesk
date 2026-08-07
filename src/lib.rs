@@ -1,4 +1,4 @@
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(target_os = "macos")]
 mod headless_auth;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod headless_file_transfer;

@@ -1,23 +1,31 @@
 mod args;
+#[cfg(target_os = "macos")]
 mod completion;
+#[cfg(target_os = "macos")]
 mod error;
+#[cfg(target_os = "macos")]
 mod handler;
+#[cfg(target_os = "macos")]
 mod paths;
 #[cfg(target_os = "macos")]
 mod runtime;
 #[cfg(target_os = "macos")]
 mod signals;
+#[cfg(target_os = "macos")]
 mod state;
 
 pub(crate) use args::{
     classify, is_requested, usage, HeadlessFileTransferArgs, HeadlessFileTransferDispatch,
     TransferDirection,
 };
+#[cfg(target_os = "macos")]
 pub(crate) use error::HeadlessFileTransferError;
+#[cfg(target_os = "macos")]
 pub(crate) use paths::{
     inspect_pull_destination, inspect_push_source, single_regular_file_size,
     split_remote_file_path, verify_source_unchanged, FileSnapshot, RemoteFilePath,
 };
+#[cfg(target_os = "macos")]
 pub(crate) use state::{
     RuntimeEvent, TransferAction, TransferBackend, TransferCoordinator, TransferSignal,
 };

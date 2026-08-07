@@ -313,6 +313,7 @@ def assert_headless_file_transfer_contract(
     )
 
     assert "mod headless_file_transfer;" in lib_rs
+    assert '#[cfg(target_os = "macos")]\nmod headless_auth;' in lib_rs
     assert "&& !crate::headless_file_transfer::is_requested(args)" in core_main_rs
     assert "crate::headless_file_transfer::run_cli(&args)" in core_main_rs
     assert_in_order(
@@ -322,6 +323,8 @@ def assert_headless_file_transfer_contract(
     )
     for module in ("args", "completion", "error", "handler", "paths", "runtime", "signals", "state"):
         assert f"mod {module};" in file_root_rs
+    for module in ("completion", "error", "handler", "paths", "runtime", "signals", "state"):
+        assert f'#[cfg(target_os = "macos")]\nmod {module};' in file_root_rs
 
     assert '"--password"' in file_args_rs
     assert "value if value.starts_with('-')" in file_args_rs
