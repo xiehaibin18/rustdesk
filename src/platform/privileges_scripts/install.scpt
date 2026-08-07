@@ -8,6 +8,8 @@ on run {daemon_file, agent_file, user}
   set bad_agent_plist to "/Library/LaunchAgents/com.herbin." & "Rust" & "Desk-Herbin-Herbin_server.plist"
 
   set resolve_uid to "uid=$(id -u " & quoted form of user & " 2>/dev/null || true);"
+  set unload_agent to "if [ -n \"$uid\" ]; then launchctl bootout gui/$uid " & quoted form of agent_plist & " 2>/dev/null || launchctl bootout user/$uid " & quoted form of agent_plist & " 2>/dev/null || launchctl unload -w " & quoted form of agent_plist & " || true; else launchctl unload -w " & quoted form of agent_plist & " || true; fi;"
+  set unload_daemon to "launchctl bootout system " & quoted form of daemon_plist & " 2>/dev/null || launchctl unload -w " & quoted form of daemon_plist & " || true;"
   set unload_legacy_agent to "if [ -n \"$uid\" ]; then launchctl bootout gui/$uid " & quoted form of legacy_agent_plist & " 2>/dev/null || launchctl bootout user/$uid " & quoted form of legacy_agent_plist & " 2>/dev/null || launchctl unload -w " & quoted form of legacy_agent_plist & " || true; else launchctl unload -w " & quoted form of legacy_agent_plist & " || true; fi;"
   set unload_legacy_daemon to "launchctl bootout system " & quoted form of legacy_daemon_plist & " 2>/dev/null || launchctl unload -w " & quoted form of legacy_daemon_plist & " || true;"
   set unload_bad_agent to "if [ -n \"$uid\" ]; then launchctl bootout gui/$uid " & quoted form of bad_agent_plist & " 2>/dev/null || launchctl bootout user/$uid " & quoted form of bad_agent_plist & " 2>/dev/null || launchctl unload -w " & quoted form of bad_agent_plist & " || true; else launchctl unload -w " & quoted form of bad_agent_plist & " || true; fi;"
@@ -30,7 +32,7 @@ on run {daemon_file, agent_file, user}
   set kickstart_agent to "if [ -n \"$uid\" ]; then launchctl kickstart -k gui/$uid/$agent_label 2>/dev/null || launchctl kickstart -k user/$uid/$agent_label 2>/dev/null || true; fi;"
   set load_agent to agent_label_cmd & bootstrap_agent & kickstart_agent
 
-  set sh to resolve_uid & unload_legacy_agent & unload_legacy_daemon & unload_bad_agent & unload_bad_daemon & remove_legacy_plists & remove_bad_plists & sh1 & sh2 & sh3 & sh4 & sh5 & load_agent
+  set sh to resolve_uid & unload_agent & unload_daemon & unload_legacy_agent & unload_legacy_daemon & unload_bad_agent & unload_bad_daemon & remove_legacy_plists & remove_bad_plists & sh1 & sh2 & sh3 & sh4 & sh5 & load_agent
 
   do shell script sh with prompt "RustDesk wants to install daemon and agent" with administrator privileges
 end run
