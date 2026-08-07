@@ -6,6 +6,10 @@
 - Product identity remains isolated as `RustDesk-Herbin`, bundle ID
   `com.herbin.rustdesk`, URL scheme `rustdesk-herbin://`, and independent macOS
   config and launchd namespaces.
+- Generated macOS service plists preserve the exact bundle ID while applying
+  product-name substitutions. Reinstalling the service unloads the current
+  user agent and root daemon before rewriting and reloading them so launchd
+  refreshes its code requirements after an application replacement.
 - The abandoned Windows and macOS shortcut-remapping experiments have been
   removed. RDH now uses upstream keyboard handling without a custom keymap file,
   built-in remap, or compatibility fallback.

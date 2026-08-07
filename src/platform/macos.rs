@@ -453,15 +453,32 @@ fn update_daemon_agent(agent_plist_file: String, update_source_dir: String, sync
 }
 
 fn correct_app_name(s: &str) -> String {
+    let bundle_id = get_bundle_id();
+    let app_name = crate::get_app_name();
+    let full_name = crate::get_full_name();
+    correct_app_name_with_identity(s, bundle_id.as_deref(), &app_name, &full_name)
+}
+
+fn correct_app_name_with_identity(
+    s: &str,
+    bundle_id: Option<&str>,
+    app_name: &str,
+    full_name: &str,
+) -> String {
     let full_name_placeholder = "__full_name__";
+    let bundle_id_placeholder = "__bundle_id__";
     let mut s = s.to_owned();
     s = s.replace("com.carriez.RustDesk", full_name_placeholder);
-    if let Some(bundleid) = get_bundle_id() {
-        s = s.replace("com.carriez.rustdesk", &bundleid);
+    if bundle_id.is_some() {
+        s = s.replace("com.carriez.rustdesk", bundle_id_placeholder);
     }
-    s = s.replace("rustdesk", &crate::get_app_name().to_lowercase());
-    s = s.replace("RustDesk", &crate::get_app_name());
-    s.replace(full_name_placeholder, &crate::get_full_name())
+    s = s.replace("rustdesk", &app_name.to_lowercase());
+    s = s.replace("RustDesk", app_name);
+    s = s.replace(full_name_placeholder, full_name);
+    if let Some(bundle_id) = bundle_id {
+        s = s.replace(bundle_id_placeholder, bundle_id);
+    }
+    s
 }
 
 pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
@@ -1378,5 +1395,24 @@ fn get_bundle_id() -> Option<String> {
             .to_string_lossy()
             .to_string();
         Some(bundle_id_str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::correct_app_name_with_identity;
+
+    #[test]
+    fn correct_app_name_preserves_launchagent_bundle_identifier() {
+        let agent_plist = include_str!("privileges_scripts/agent.plist");
+        let corrected = correct_app_name_with_identity(
+            agent_plist,
+            Some("com.herbin.rustdesk"),
+            "RustDesk-Herbin",
+            "com.herbin.RustDesk-Herbin",
+        );
+
+        assert!(corrected.contains("<string>com.herbin.rustdesk</string>"));
+        assert!(!corrected.contains("com.herbin.rustdesk-herbin"));
     }
 }

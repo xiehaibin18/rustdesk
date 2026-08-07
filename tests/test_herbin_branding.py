@@ -36,6 +36,24 @@ def assert_in_order(text: str, first: str, second: str) -> None:
     assert first_index < second_index, f"expected {first!r} before {second!r}"
 
 
+def assert_install_reloads_current_launchd_jobs(install_script: str) -> None:
+    unload_agent = re.search(r"(?m)^  set unload_agent to (?P<body>.+)$", install_script)
+    assert unload_agent is not None
+    assert "quoted form of agent_plist" in unload_agent.group("body")
+
+    unload_daemon = re.search(r"(?m)^  set unload_daemon to (?P<body>.+)$", install_script)
+    assert unload_daemon is not None
+    assert "quoted form of daemon_plist" in unload_daemon.group("body")
+
+    shell = re.search(r"(?m)^  set sh to (?P<body>.+)$", install_script)
+    assert shell is not None
+    shell_parts = [part.strip() for part in shell.group("body").split(" & ")]
+    assert shell_parts.index("resolve_uid") < shell_parts.index("unload_agent")
+    assert shell_parts.index("unload_agent") < shell_parts.index("unload_daemon")
+    assert shell_parts.index("unload_daemon") < shell_parts.index("sh1")
+    assert shell_parts.index("sh2") < shell_parts.index("load_agent")
+
+
 def sanitized_source(source: str, *, remove_strings: bool = False) -> str:
     """Blank active-source comments/literals while preserving offsets/newlines."""
     output = list(source)
@@ -864,6 +882,7 @@ def main() -> None:
 
     assert 'launchctl bootstrap gui/$uid ' in mac_install_script
     assert 'launchctl kickstart -k gui/$uid/$agent_label' in mac_install_script
+    assert_install_reloads_current_launchd_jobs(mac_install_script)
     assert "legacy_agent_plist" in mac_install_script
     assert "bad_agent_plist" in mac_install_script
     assert "legacy_daemon_plist" in mac_update_script
