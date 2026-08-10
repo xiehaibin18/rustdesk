@@ -7,7 +7,7 @@ class AppDelegate: FlutterAppDelegate {
     var launched = false;
 
     static func main() {
-        if rustdesk_headless_terminal_is_requested() {
+        if rustdesk_cli_is_requested() {
             if rustdesk_core_main() {
                 exit(EXIT_FAILURE)
             }

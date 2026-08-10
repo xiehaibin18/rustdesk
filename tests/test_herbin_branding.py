@@ -362,11 +362,15 @@ def assert_headless_file_transfer_ci_and_docs_contract(
 ) -> None:
     assert macos_workflow.count("- name: Test RDH headless CLIs") == 1
     for command in (
+        "cargo test --locked --lib rdh_cli",
         "cargo test --locked --lib headless_file_transfer",
         "cargo test --locked --lib headless_terminal",
         "--features flutter,hwcodec,unix-file-copy-paste,screencapturekit",
     ):
         assert command in macos_workflow
+    assert macos_workflow.index("rdh_cli") < macos_workflow.index(
+        "headless_file_transfer"
+    )
     assert macos_workflow.index("headless_file_transfer") < macos_workflow.index(
         "headless_terminal"
     )

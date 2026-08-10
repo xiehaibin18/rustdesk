@@ -30,6 +30,23 @@ preprocessing and must not add file watching or private window APIs.
 
 Custom keyboard mapping and high-volume mouse diagnostics must remain absent.
 
+## CLI discovery and fail-closed dispatch
+
+The operator-facing guide is [`docs/rdh-cli.md`](rdh-cli.md). Every macOS
+candidate must handle `--help`, `--help terminal`, `--help file-transfer`,
+`--version`, and `--capabilities` before starting AppKit or Flutter.
+
+`--version` prints the upstream application version plus the compile-time RDH
+revision, while `--capabilities` prints one stable capability name per line.
+CI supplies the revision through `RDH_REVISION`; an explicit local development
+build without it reports `rdh.dev` rather than pretending to be a released
+candidate.
+
+Every argument vector containing `--headless` is claimed before AppKit. The
+terminal and file-transfer parsers own their supported combinations. Any other
+headless combination fails closed with status 2 and stderr diagnostics instead
+of falling through to a Flutter connection window.
+
 ## Headless terminal CLI
 
 On macOS, run an interactive remote terminal without opening Flutter or creating

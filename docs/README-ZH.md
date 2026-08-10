@@ -26,6 +26,8 @@ RustDesk 期待各位的贡献. 如何参与开发? 详情请看 [CONTRIBUTING-Z
 
 [**FAQ**](https://github.com/rustdesk/rustdesk/wiki/FAQ)
 
+[**RustDesk-Herbin CLI 使用指南**](rdh-cli.md)
+
 [**BINARY DOWNLOAD**](https://github.com/rustdesk/rustdesk/releases)
 
 [**NIGHTLY BUILD**](https://github.com/rustdesk/rustdesk/releases/tag/nightly)

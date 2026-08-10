@@ -52,6 +52,19 @@
 
 No public compatibility layer is retained for the removed shortcut mapping.
 
+## macOS CLI discovery and dispatch
+
+- `--help`, topic help, `--version`, and `--capabilities` are handled before
+  global runtime initialization and before AppKit/Flutter. CI injects
+  `RDH_REVISION`; local builds without it identify themselves as `rdh.dev`.
+- The pre-AppKit gate claims every argument vector containing `--headless`.
+  Supported terminal and file-transfer combinations reach their existing
+  parsers; any other combination fails closed with status 2 and never becomes a
+  Flutter peer connection.
+- `docs/rdh-cli.md` is the operator source of truth. It separates installed and
+  candidate binaries, defines the capability preflight, and requires external
+  SHA-256 verification after file transfer.
+
 ## macOS headless file transfer CLI
 
 - `--file-transfer --headless` owns only the combined form before Flutter

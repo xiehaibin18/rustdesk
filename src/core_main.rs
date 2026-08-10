@@ -14,6 +14,7 @@ fn should_dispatch_flutter_connection(args: &[String], requested: bool) -> bool 
     requested
         && !crate::headless_terminal::is_requested(args)
         && !crate::headless_file_transfer::is_requested(args)
+        && !crate::rdh_cli::is_unsupported_headless(args)
 }
 
 #[macro_export]
@@ -35,6 +36,20 @@ macro_rules! my_println{
 /// If it returns [`Some`], then the process will continue, and flutter gui will be started.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
+    let startup_args = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Some(exit) = crate::rdh_cli::classify_current_metadata(&startup_args) {
+        crate::rdh_cli::emit(&exit);
+        if exit.status != 0 {
+            std::process::exit(exit.status);
+        }
+        return None;
+    }
+    if crate::rdh_cli::is_unsupported_headless(&startup_args) {
+        let exit = crate::rdh_cli::unsupported_headless_exit();
+        crate::rdh_cli::emit(&exit);
+        std::process::exit(exit.status);
+    }
+
     crate::common::apply_fork_identity();
     if !crate::common::global_init() {
         return None;
@@ -135,10 +150,7 @@ pub fn core_main() -> Option<Vec<String>> {
         args.clear();
     }
     if args.len() > 0 {
-        if args[0] == "--version" {
-            println!("{}", crate::VERSION);
-            return None;
-        } else if args[0] == "--build-date" {
+        if args[0] == "--build-date" {
             println!("{}", crate::BUILD_DATE);
             return None;
         }
@@ -1076,6 +1088,14 @@ mod tests {
         ));
         assert!(should_dispatch_flutter_connection(
             &args(&["--terminal", "175116438"]),
+            true
+        ));
+    }
+
+    #[test]
+    fn unsupported_headless_command_is_not_dispatched_to_flutter() {
+        assert!(!should_dispatch_flutter_connection(
+            &args(&["--connect", "--headless", "175116438"]),
             true
         ));
     }
