@@ -14,6 +14,7 @@ use crate::{
 // Empirical no-data window before exposing the restart reconnect state to the UI.
 // Restart msgbox text is kept as a legacy UI fallback; Flutter handles the type as a control event.
 const RESTART_REMOTE_DEVICE_NO_DATA_TIMEOUT: Duration = Duration::from_secs(5);
+const KCP_CLOSE_REASON_FLUSH_DELAY: Duration = Duration::from_millis(30);
 #[cfg(feature = "unix-file-copy-paste")]
 use crate::{clipboard::try_empty_clipboard_files, clipboard_file::unix_file_clip};
 #[cfg(any(
@@ -183,8 +184,20 @@ impl<T: InvokeUiSession> Remote<T> {
                     .lock()
                     .unwrap()
                     .set_connected();
+                let is_secured = peer.is_secured();
                 self.handler
-                    .set_connection_type(peer.is_secured(), direct, stream_type); // flutter -> connection_ready
+                    .set_connection_type(is_secured, direct, stream_type); // flutter -> connection_ready
+                if !is_secured
+                    && !crate::common::is_direct_ip_access(&self.handler.get_id())
+                    && !client::confirm_insecure_connection(&self.handler, &mut self.receiver).await
+                {
+                    self.send_close_reason(&mut peer, "").await;
+                    if kcp.is_some() {
+                        tokio::time::sleep(KCP_CLOSE_REASON_FLUSH_DELAY).await;
+                    }
+                    self.handle_disconnected(round);
+                    return;
+                }
                 self.handler.update_direct(Some(direct));
                 if conn_type == ConnType::DEFAULT_CONN || conn_type == ConnType::VIEW_CAMERA {
                     self.handler
@@ -273,9 +286,16 @@ impl<T: InvokeUiSession> Remote<T> {
                                 break;
                             }
                             if !self.read_jobs.is_empty() {
-                                if let Err(err) = fs::handle_read_jobs(&mut self.read_jobs, &mut peer).await {
-                                    self.handler.msgbox("error", "Connection Error", &err.to_string(), "");
-                                    break;
+                                match fs::handle_read_jobs(&mut self.read_jobs, &mut peer).await {
+                                    Ok(job_json) => {
+                                        if !job_json.is_empty() {
+                                            self.handler.file_transfer_job_completed(&job_json);
+                                        }
+                                    }
+                                    Err(err) => {
+                                        self.handler.msgbox("error", "Connection Error", &err.to_string(), "");
+                                        break;
+                                    }
                                 }
                                 self.update_jobs_status();
                             } else {
@@ -338,13 +358,17 @@ impl<T: InvokeUiSession> Remote<T> {
                     self.send_close_reason(&mut peer, "kcp").await;
                     // KCP does not send messages immediately, so wait to ensure the last message is sent.
                     // 1ms works in my test, but 30ms is more reliable.
-                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    tokio::time::sleep(KCP_CLOSE_REASON_FLUSH_DELAY).await;
                 }
             }
             Err(err) => {
                 self.handler.on_establish_connection_error(err.to_string());
             }
         }
+        self.handle_disconnected(round);
+    }
+
+    fn handle_disconnected(&self, round: u32) {
         // set_disconnected_ok is used to check if new connection round is started.
         let _set_disconnected_ok = self
             .handler
@@ -360,6 +384,8 @@ impl<T: InvokeUiSession> Remote<T> {
 
         #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
         if self.handler.is_default() && _set_disconnected_ok {
+            // Linux client cleanup runs synchronously in try_stop_clipboard() before FUSE is
+            // unmounted. Keep this async path for other file-clipboard platforms.
             crate::clipboard::try_empty_clipboard_files(ClipboardSide::Client, self.client_conn_id);
         }
     }
@@ -1088,6 +1114,9 @@ impl<T: InvokeUiSession> Remote<T> {
     }
 
     async fn send_toggle_virtual_display_msg(&self, peer: &mut Stream) {
+        if self.handler.is_view_camera() {
+            return;
+        }
         if !self.peer_info.is_support_virtual_display() {
             return;
         }
@@ -1109,6 +1138,9 @@ impl<T: InvokeUiSession> Remote<T> {
     }
 
     async fn send_toggle_privacy_mode_msg(&self, peer: &mut Stream) {
+        if self.handler.is_view_camera() {
+            return;
+        }
         let lc = self.handler.lc.read().unwrap();
         if lc.version >= hbb_common::get_version_number("1.2.4")
             && lc.get_toggle_option("privacy-mode")
@@ -1690,11 +1722,20 @@ impl<T: InvokeUiSession> Remote<T> {
                         Some(file_response::Union::Done(d)) => {
                             let mut err: Option<String> = None;
                             let mut job_type = fs::JobType::Generic;
+                            let mut completion_job_json = None;
                             let mut printer_data = None;
                             if let Some(job) = fs::remove_job(d.id, &mut self.write_jobs) {
                                 job.modify_time();
                                 err = job.job_error();
                                 job_type = job.r#type;
+                                if job_type == fs::JobType::Generic {
+                                    completion_job_json = Some(fs::serialize_transfer_job(
+                                        &job,
+                                        err.is_none(),
+                                        false,
+                                        err.as_deref().unwrap_or(""),
+                                    ));
+                                }
                                 printer_data = match job.get_buf_data().await {
                                     Ok(d) => d,
                                     Err(e) => {
@@ -1705,6 +1746,9 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                             match job_type {
                                 fs::JobType::Generic => {
+                                    if let Some(job_json) = completion_job_json {
+                                        self.handler.file_transfer_job_completed(&job_json);
+                                    }
                                     self.handle_job_status(d.id, d.file_num, err);
                                 }
                                 fs::JobType::Printer => {
@@ -1741,12 +1785,23 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         Some(file_response::Union::Error(e)) => {
+                            let mut completion_job_json = None;
                             let job_type = fs::remove_job(e.id, &mut self.write_jobs)
                                 .or_else(|| fs::remove_job(e.id, &mut self.read_jobs))
-                                .map(|j| j.r#type)
+                                .map(|job| {
+                                    if job.r#type == fs::JobType::Generic {
+                                        completion_job_json = Some(fs::serialize_transfer_job(
+                                            &job, false, false, &e.error,
+                                        ));
+                                    }
+                                    job.r#type
+                                })
                                 .unwrap_or(fs::JobType::Generic);
                             match job_type {
                                 fs::JobType::Generic => {
+                                    if let Some(job_json) = completion_job_json {
+                                        self.handler.file_transfer_job_completed(&job_json);
+                                    }
                                     self.handle_job_status(e.id, e.file_num, Some(e.error));
                                 }
                                 fs::JobType::Printer => {

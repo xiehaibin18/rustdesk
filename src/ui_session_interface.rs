@@ -128,6 +128,10 @@ impl ConnectionRoundState {
             true
         }
     }
+
+    pub fn is_connected(&self) -> bool {
+        matches!(self.state, ConnectionState::Connected)
+    }
 }
 
 impl Default for ConnectionRoundState {
@@ -788,7 +792,37 @@ impl<T: InvokeUiSession> Session<T> {
         msg_out.set_misc(misc);
         self.send(Data::Message(msg_out));
     }
+}
 
+#[cfg(test)]
+mod terminal_input_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_input_message_preserves_non_utf8_bytes() {
+        let payload = vec![0x00, 0x03, 0x1b, 0xff];
+        let message = terminal_input_message(7, payload.clone());
+        let action = message.terminal_action();
+        let data = action.data();
+
+        assert_eq!(data.terminal_id, 7);
+        assert_eq!(data.data.as_ref(), payload.as_slice());
+    }
+}
+
+fn terminal_input_message(terminal_id: i32, data: Vec<u8>) -> Message {
+    let mut action = TerminalAction::new();
+    action.set_data(TerminalData {
+        terminal_id,
+        data: bytes::Bytes::from(data),
+        ..Default::default()
+    });
+    let mut message = Message::new();
+    message.set_terminal_action(action);
+    message
+}
+
+impl<T: InvokeUiSession> Session<T> {
     // Terminal methods
     pub fn open_terminal(&self, terminal_id: i32, rows: u32, cols: u32) {
         let mut action = TerminalAction::new();
@@ -804,15 +838,11 @@ impl<T: InvokeUiSession> Session<T> {
     }
 
     pub fn send_terminal_input(&self, terminal_id: i32, data: String) {
-        let mut action = TerminalAction::new();
-        action.set_data(TerminalData {
-            terminal_id,
-            data: bytes::Bytes::from(data.into_bytes()),
-            ..Default::default()
-        });
-        let mut msg_out = Message::new();
-        msg_out.set_terminal_action(action);
-        self.send(Data::Message(msg_out));
+        self.send_terminal_input_bytes(terminal_id, data.into_bytes());
+    }
+
+    pub fn send_terminal_input_bytes(&self, terminal_id: i32, data: Vec<u8>) {
+        self.send(Data::Message(terminal_input_message(terminal_id, data)));
     }
 
     pub fn resize_terminal(&self, terminal_id: i32, rows: u32, cols: u32) {
@@ -1404,6 +1434,15 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::Close);
     }
 
+    pub fn continue_insecure_connection(&self, continue_insecure: bool) {
+        let data = if continue_insecure {
+            Data::ContinueInsecureConnection
+        } else {
+            Data::RejectInsecureConnection
+        };
+        self.send(data);
+    }
+
     fn try_auto_start_job_str(is_reconnected: bool, job_str: &str) -> Option<String> {
         if is_reconnected {
             let job_str = job_str.trim();
@@ -1685,6 +1724,7 @@ pub trait InvokeUiSession: Send + Sync + Clone + 'static + Sized + Default {
     fn set_fingerprint(&self, fingerprint: String);
     fn job_error(&self, id: i32, err: String, file_num: i32);
     fn job_done(&self, id: i32, file_num: i32);
+    fn file_transfer_job_completed(&self, _job_json: &str) {}
     fn clear_all_jobs(&self);
     fn new_message(&self, msg: String);
     fn update_transfer_list(&self);
@@ -1805,10 +1845,12 @@ impl<T: InvokeUiSession> Interface for Session<T> {
                 self.msgbox("error", "Error", msg, "");
                 return;
             }
-            self.try_change_init_resolution(pi.current_display);
-            let p = self.lc.read().unwrap().should_auto_login();
-            if !p.is_empty() {
-                input_os_password(p, true, self.clone());
+            if !self.is_view_camera() {
+                self.try_change_init_resolution(pi.current_display);
+                let p = self.lc.read().unwrap().should_auto_login();
+                if !p.is_empty() {
+                    input_os_password(p, true, self.clone());
+                }
             }
             let current = &pi.displays[pi.current_display as usize];
             self.set_display(

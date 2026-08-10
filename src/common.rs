@@ -764,15 +764,14 @@ async fn test_rendezvous_server_() {
     Config::reset_online();
 }
 
-// #[cfg(any(target_os = "android", target_os = "ios", feature = "cli"))]
 pub fn test_rendezvous_server() {
     std::thread::spawn(test_rendezvous_server_);
 }
 
 pub fn refresh_rendezvous_server() {
-    #[cfg(any(target_os = "android", target_os = "ios", feature = "cli"))]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     test_rendezvous_server();
-    #[cfg(not(any(target_os = "android", target_os = "ios", feature = "cli")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     std::thread::spawn(|| {
         if crate::ipc::test_rendezvous_server().is_err() {
             test_rendezvous_server();
@@ -1003,6 +1002,25 @@ pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
 #[inline]
 pub fn get_app_name() -> String {
     hbb_common::config::APP_NAME.read().unwrap().clone()
+}
+
+pub const FORK_APP_NAME: &str = "RustDesk-Herbin";
+#[cfg(target_os = "macos")]
+pub const FORK_ORG: &str = "com.herbin";
+
+#[inline]
+pub fn apply_fork_identity() {
+    let mut app_name = hbb_common::config::APP_NAME.write().unwrap();
+    if app_name.as_str() == "RustDesk" {
+        *app_name = FORK_APP_NAME.to_owned();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut org = hbb_common::config::ORG.write().unwrap();
+        if org.as_str() == "com.carriez" {
+            *org = FORK_ORG.to_owned();
+        }
+    }
 }
 
 #[inline]
@@ -1923,7 +1941,7 @@ pub fn check_process(arg: &str, mut same_uid: bool) -> bool {
         if same_uid && p.user_id() != my_uid {
             continue;
         }
-        // on mac, p.cmd() get "/Applications/RustDesk.app/Contents/MacOS/RustDesk", "XPC_SERVICE_NAME=com.carriez.RustDesk_server"
+        // on mac, p.cmd() get "/Applications/RustDesk-Herbin.app/Contents/MacOS/RustDesk-Herbin", "XPC_SERVICE_NAME=com.herbin.RustDesk-Herbin_server"
         let parg = if p.cmd().len() <= 1 { "" } else { &p.cmd()[1] };
         if arg.is_empty() {
             if !parg.starts_with("--") {
@@ -2618,6 +2636,10 @@ pub fn get_control_permission(
     } else {
         None
     }
+}
+
+pub fn is_direct_ip_access(peer: &str) -> bool {
+    hbb_common::is_ip_str(peer) || hbb_common::is_domain_port_str(peer)
 }
 
 #[cfg(test)]

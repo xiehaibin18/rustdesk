@@ -1,6 +1,6 @@
 [package]
 name = "rustdesk"
-version = "1.4.8"
+version = "1.4.9"
 authors = ["rustdesk <info@rustdesk.com>"]
 edition = "2021"
 build= "build.rs"
@@ -22,7 +22,6 @@ path = "src/service.rs"
 
 [features]
 inline = []
-cli = []
 use_samplerate = ["samplerate"]
 use_rubato = ["rubato"]
 use_dasp = ["dasp"]
@@ -62,8 +61,6 @@ dasp = { version = "0.11", features = ["signal", "interpolate-linear", "interpol
 rubato = { version = "0.12", optional = true }
 samplerate = { version = "0.2", optional = true }
 uuid = { version = "1.3", features = ["v4"] }
-clap = "4.2"
-rpassword = "7.2"
 num_cpus = "1.15"
 bytes = { version = "1.4", features = ["serde"] }
 default-net = "0.14"
@@ -146,6 +143,7 @@ tauri-winrt-notification = "0.1"
 runas = "1.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+toml = "0.8.2"
 objc = "0.2"
 cocoa = "0.24"
 dispatch = "0.2"
@@ -213,10 +211,10 @@ exclude = ["vdi/host", "examples/custom_plugin"]
 libxdo-sys = { path = "libs/libxdo-sys-stub" }
 
 [package.metadata.winres]
-LegalCopyright = "Copyright © 2025 Purslane Ltd. All rights reserved."
-ProductName = "RustDesk"
+LegalCopyright = "Copyright © 2026 Purslane Tech Pte. Ltd. All rights reserved."
+ProductName = "RustDesk-Herbin"
 FileDescription = "RustDesk Remote Desktop"
-OriginalFilename = "rustdesk.exe"
+OriginalFilename = "rustdesk-herbin.exe"
 
 [target.'cfg(target_os="windows")'.build-dependencies]
 winres = "0.1"
@@ -232,8 +230,8 @@ hound = "3.5"
 docopt = "1.1"
 
 [package.metadata.bundle]
-name = "RustDesk"
-identifier = "com.carriez.rustdesk"
+name = "RustDesk-Herbin"
+identifier = "com.herbin.rustdesk"
 icon = ["res/32x32.png", "res/128x128.png", "res/128x128@2x.png"]
 osx_minimum_system_version = "10.14"
 

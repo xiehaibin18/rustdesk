@@ -101,9 +101,17 @@ fn load_plugin_in_app_path(dll_name: &str) -> Result<Library, LibError> {
 
 /// FFI for rustdesk core's main entry.
 /// Return true if the app should continue running with UI(possibly Flutter), false if the app should exit.
+#[cfg(target_os = "macos")]
+#[no_mangle]
+pub extern "C" fn rustdesk_cli_is_requested() -> bool {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    crate::rdh_cli::should_start_without_appkit(&args)
+}
+
 #[cfg(not(windows))]
 #[no_mangle]
 pub extern "C" fn rustdesk_core_main() -> bool {
+    crate::common::apply_fork_identity();
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if crate::core_main::core_main().is_some() {
         return true;
@@ -124,6 +132,7 @@ pub extern "C" fn handle_applicationShouldOpenUntitledFile() {
 #[cfg(windows)]
 #[no_mangle]
 pub extern "C" fn rustdesk_core_main_args(args_len: *mut c_int) -> *mut *mut c_char {
+    crate::common::apply_fork_identity();
     unsafe { std::ptr::write(args_len, 0) };
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -694,7 +703,8 @@ impl InvokeUiSession for FlutterHandler {
     }
 
     /// unused in flutter, use switch_display or set_peer_info
-    fn set_display(&self, _x: i32, _y: i32, _w: i32, _h: i32, _cursor_embedded: bool, _scale: f64) {}
+    fn set_display(&self, _x: i32, _y: i32, _w: i32, _h: i32, _cursor_embedded: bool, _scale: f64) {
+    }
 
     fn update_privacy_mode(&self) {
         self.push_event::<&str>("update_privacy_mode", &[], &[]);
@@ -1437,7 +1447,7 @@ fn try_send_close_event(event_stream: &Option<StreamSink<EventToUI>>) {
 pub fn update_text_clipboard_required() {
     let is_required = sessions::get_sessions()
         .iter()
-        .any(|s| s.is_text_clipboard_required());
+        .any(|s| s.is_default() && s.is_text_clipboard_required());
     #[cfg(target_os = "android")]
     let _ = scrap::android::ffi::call_clipboard_manager_enable_client_clipboard(is_required);
     Client::set_is_text_clipboard_required(is_required);
@@ -1447,13 +1457,16 @@ pub fn update_text_clipboard_required() {
 pub fn update_file_clipboard_required() {
     let is_required = sessions::get_sessions()
         .iter()
-        .any(|s| s.is_file_clipboard_required());
+        .any(|s| s.is_default() && s.is_file_clipboard_required());
     Client::set_is_file_clipboard_required(is_required);
 }
 
 #[cfg(not(target_os = "ios"))]
 pub fn send_clipboard_msg(msg: Message, _is_file: bool) {
     for s in sessions::get_sessions() {
+        if !s.is_default() {
+            continue;
+        }
         #[cfg(feature = "unix-file-copy-paste")]
         if _is_file {
             if crate::is_support_file_copy_paste_num(s.lc.read().unwrap().version)
@@ -2295,6 +2308,16 @@ pub mod sessions {
     pub fn has_sessions_running(conn_type: ConnType) -> bool {
         SESSIONS.read().unwrap().iter().any(|((_, r#type), s)| {
             *r#type == conn_type && s.session_handlers.read().unwrap().len() != 0
+        })
+    }
+
+    #[inline]
+    #[cfg(not(target_os = "ios"))]
+    pub fn has_connected_sessions_running(conn_type: ConnType) -> bool {
+        SESSIONS.read().unwrap().iter().any(|((_, r#type), s)| {
+            *r#type == conn_type
+                && s.session_handlers.read().unwrap().len() != 0
+                && s.connection_round_state.lock().unwrap().is_connected()
         })
     }
 }

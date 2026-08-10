@@ -1,4 +1,12 @@
+#[cfg(target_os = "macos")]
+mod headless_auth;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod headless_file_transfer;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod headless_terminal;
 mod keyboard;
+#[cfg(target_os = "macos")]
+pub(crate) mod window_targeting;
 /// cbindgen:ignore
 pub mod platform;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -17,6 +25,8 @@ mod lan;
 mod rendezvous_mediator;
 #[cfg(not(any(target_os = "ios")))]
 pub use self::rendezvous_mediator::*;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod rdh_cli;
 /// cbindgen:ignore
 pub mod common;
 #[cfg(not(any(target_os = "ios")))]
@@ -24,7 +34,6 @@ pub mod ipc;
 #[cfg(not(any(
     target_os = "android",
     target_os = "ios",
-    feature = "cli",
     feature = "flutter"
 )))]
 pub mod ui;
@@ -38,11 +47,9 @@ pub mod flutter;
 pub mod flutter_ffi;
 use common::*;
 mod auth_2fa;
-#[cfg(feature = "cli")]
-pub mod cli;
 #[cfg(not(target_os = "ios"))]
 mod clipboard;
-#[cfg(not(any(target_os = "android", target_os = "ios", feature = "cli")))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod core_main;
 mod custom_server;
 mod lang;

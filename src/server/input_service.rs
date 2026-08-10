@@ -1134,6 +1134,10 @@ pub fn handle_mouse_simulation_(evt: &MouseEvent, conn: i32) {
         }
         MOUSE_TYPE_DOWN => match buttons {
             MOUSE_BUTTON_LEFT => {
+                #[cfg(target_os = "macos")]
+                if let Some((x, y)) = crate::get_cursor_pos() {
+                    crate::window_targeting::preprocess_remote_left_click(x, y);
+                }
                 allow_err!(en.mouse_down(MouseButton::Left));
             }
             MOUSE_BUTTON_RIGHT => {

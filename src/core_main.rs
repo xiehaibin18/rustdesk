@@ -10,6 +10,13 @@ use hbb_common::{config, log};
 #[cfg(windows)]
 use tauri_winrt_notification::{Duration, Sound, Toast};
 
+fn should_dispatch_flutter_connection(args: &[String], requested: bool) -> bool {
+    requested
+        && !crate::headless_terminal::is_requested(args)
+        && !crate::headless_file_transfer::is_requested(args)
+        && !crate::rdh_cli::is_unsupported_headless(args)
+}
+
 #[macro_export]
 macro_rules! my_println{
     ($($arg:tt)*) => {
@@ -29,6 +36,21 @@ macro_rules! my_println{
 /// If it returns [`Some`], then the process will continue, and flutter gui will be started.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
+    let startup_args = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Some(exit) = crate::rdh_cli::classify_current_metadata(&startup_args) {
+        crate::rdh_cli::emit(&exit);
+        if exit.status != 0 {
+            std::process::exit(exit.status);
+        }
+        return None;
+    }
+    if crate::rdh_cli::is_unsupported_headless(&startup_args) {
+        let exit = crate::rdh_cli::unsupported_headless_exit();
+        crate::rdh_cli::emit(&exit);
+        std::process::exit(exit.status);
+    }
+
+    crate::common::apply_fork_identity();
     if !crate::common::global_init() {
         return None;
     }
@@ -116,7 +138,7 @@ pub fn core_main() -> Option<Vec<String>> {
         hbb_common::platform::windows::start_cpu_performance_monitor();
     }
     #[cfg(feature = "flutter")]
-    if _is_flutter_invoke_new_connection {
+    if should_dispatch_flutter_connection(&args, _is_flutter_invoke_new_connection) {
         return core_main_invoke_new_connection(std::env::args());
     }
     let click_setup = cfg!(windows) && args.is_empty() && crate::common::is_setup(&arg_exe);
@@ -128,10 +150,7 @@ pub fn core_main() -> Option<Vec<String>> {
         args.clear();
     }
     if args.len() > 0 {
-        if args[0] == "--version" {
-            println!("{}", crate::VERSION);
-            return None;
-        } else if args[0] == "--build-date" {
+        if args[0] == "--build-date" {
             println!("{}", crate::BUILD_DATE);
             return None;
         }
@@ -159,6 +178,22 @@ pub fn core_main() -> Option<Vec<String>> {
         }
     }
     hbb_common::init_log(false, &log_name);
+
+    if crate::headless_file_transfer::is_requested(&args) {
+        let exit_code = crate::headless_file_transfer::run_cli(&args);
+        if exit_code != 0 {
+            std::process::exit(exit_code);
+        }
+        return None;
+    }
+
+    if crate::headless_terminal::is_requested(&args) {
+        let exit_code = crate::headless_terminal::run_cli(&args);
+        if exit_code != 0 {
+            std::process::exit(exit_code);
+        }
+        return None;
+    }
 
     // linux uni (url) go here.
     #[cfg(all(target_os = "linux", feature = "flutter"))]
@@ -689,6 +724,15 @@ pub fn core_main() -> Option<Vec<String>> {
                 println!("Installation and administrative privileges required!");
             }
             return None;
+        } else if should_handle_window_targeting_cli(&args, cfg!(target_os = "macos")) {
+            #[cfg(target_os = "macos")]
+            {
+                let exit_code = crate::window_targeting::run_cli(&args[1..]);
+                if exit_code != 0 {
+                    std::process::exit(exit_code);
+                }
+            }
+            return None;
         } else if args[0] == "--check-hwcodec-config" {
             #[cfg(feature = "hwcodec")]
             crate::ipc::hwcodec_process();
@@ -910,6 +954,11 @@ fn is_root() -> bool {
 
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn is_user_main_ipc_scope_cli_command(args: &[String]) -> bool {
+    is_user_main_ipc_scope_cli_command_for_platform(args, cfg!(target_os = "macos"))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+fn is_user_main_ipc_scope_cli_command_for_platform(args: &[String], is_macos: bool) -> bool {
     matches!(
         args.first().map(String::as_str),
         Some("--password")
@@ -920,7 +969,11 @@ fn is_user_main_ipc_scope_cli_command(args: &[String]) -> bool {
             | Some("--option")
             | Some("--assign")
             | Some("--deploy")
-    )
+    ) || should_handle_window_targeting_cli(args, is_macos)
+}
+
+fn should_handle_window_targeting_cli(args: &[String], is_macos: bool) -> bool {
+    is_macos && matches!(args.first().map(String::as_str), Some("--window-targeting"))
 }
 
 #[inline]
@@ -981,6 +1034,102 @@ mod tests {
         ] {
             assert!(!is_user_main_ipc_scope_cli_command(&args(&[command])));
         }
+    }
+
+    #[test]
+    fn window_targeting_cli_falls_through_outside_macos() {
+        let command = args(&["--window-targeting", "status"]);
+        assert!(should_handle_window_targeting_cli(&command, true));
+        assert!(!should_handle_window_targeting_cli(&command, false));
+        assert!(is_user_main_ipc_scope_cli_command_for_platform(
+            &command, true
+        ));
+        assert!(!is_user_main_ipc_scope_cli_command_for_platform(
+            &command, false
+        ));
+        assert!(!should_handle_window_targeting_cli(
+            &args(&["--connect"]),
+            true
+        ));
+    }
+
+    #[test]
+    fn headless_terminal_is_not_dispatched_to_flutter() {
+        assert!(should_dispatch_flutter_connection(
+            &args(&["--terminal", "175116438"]),
+            true
+        ));
+        assert!(!should_dispatch_flutter_connection(
+            &args(&["--terminal", "--headless", "175116438"]),
+            true
+        ));
+        assert!(!should_dispatch_flutter_connection(
+            &args(&["--terminal", "175116438", "--headless"]),
+            true
+        ));
+    }
+
+    #[test]
+    fn headless_file_transfer_is_not_dispatched_to_flutter() {
+        assert!(should_dispatch_flutter_connection(
+            &args(&["--file-transfer", "175116438"]),
+            true
+        ));
+        assert!(!should_dispatch_flutter_connection(
+            &args(&[
+                "--file-transfer",
+                "--headless",
+                "175116438",
+                "push",
+                "a",
+                "b",
+            ]),
+            true
+        ));
+        assert!(should_dispatch_flutter_connection(
+            &args(&["--terminal", "175116438"]),
+            true
+        ));
+    }
+
+    #[test]
+    fn unsupported_headless_command_is_not_dispatched_to_flutter() {
+        assert!(!should_dispatch_flutter_connection(
+            &args(&["--connect", "--headless", "175116438"]),
+            true
+        ));
+    }
+
+    #[test]
+    fn headless_file_transfer_hook_follows_logging_and_precedes_terminal_dispatch() {
+        let source = include_str!("core_main.rs");
+        let flutter_return = ["core_main_invoke_new_connection", "(std::env::args())"].concat();
+        let file_transfer_exclusion =
+            ["!crate::headless_file_transfer", "::is_requested(args)"].concat();
+        let file_transfer_hook = ["crate::headless_file_transfer", "::run_cli(&args)"].concat();
+        let terminal_hook = ["crate::headless_terminal", "::run_cli(&args)"].concat();
+
+        assert!(
+            source.find(&file_transfer_exclusion).unwrap() < source.find(&flutter_return).unwrap()
+        );
+        assert!(
+            source
+                .find("hbb_common::init_log(false, &log_name);")
+                .unwrap()
+                < source.find(&file_transfer_hook).unwrap()
+        );
+        assert!(source.find(&file_transfer_hook).unwrap() < source.find(&terminal_hook).unwrap());
+    }
+
+    #[test]
+    fn terminal_admin_headless_is_claimed_for_a_usage_error() {
+        let command = args(&["--terminal-admin", "--headless", "175116438"]);
+        assert!(crate::headless_terminal::is_requested(&command));
+        assert!(matches!(
+            crate::headless_terminal::classify(&command, true),
+            crate::headless_terminal::HeadlessTerminalDispatch::Invalid(_)
+        ));
+        assert!(!should_dispatch_flutter_connection(&command, true));
     }
 }
 

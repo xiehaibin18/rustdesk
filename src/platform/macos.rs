@@ -29,14 +29,60 @@ use objc::{class, msg_send, sel, sel_impl};
 use scrap::{libc::c_void, quartz::ffi::*};
 use std::{
     collections::HashMap,
+    mem::MaybeUninit,
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Mutex,
 };
 
+use crate::window_targeting::{ActivationPolicy, WindowCandidate};
+
 // macOS boolean_t is defined as `int` in <mach/boolean.h>
 type BooleanT = hbb_common::libc::c_int;
+
+const MAX_MAC_WINDOW_CANDIDATES: usize = 64;
+const MAC_WINDOW_STRING_CAPACITY: usize = 256;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct MacWindowCandidateRecord {
+    pid: i32,
+    window_id: u32,
+    layer: i32,
+    activation_policy: i32,
+    alpha: f64,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    covers_display: u8,
+    reserved: [u8; 7],
+    bundle_id: [u8; MAC_WINDOW_STRING_CAPACITY],
+    process_name: [u8; MAC_WINDOW_STRING_CAPACITY],
+    ax_role: [u8; MAC_WINDOW_STRING_CAPACITY],
+    ax_subrole: [u8; MAC_WINDOW_STRING_CAPACITY],
+}
+
+const _: [(); 1088] = [(); std::mem::size_of::<MacWindowCandidateRecord>()];
+
+#[derive(Debug)]
+pub struct MacWindowCollectionError;
+
+impl std::fmt::Display for MacWindowCollectionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("macOS window candidate collection failed")
+    }
+}
+
+impl std::error::Error for MacWindowCollectionError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MacWindowActivationOutcome {
+    pub result: i32,
+    pub application_activation_attempted: bool,
+    pub window_raise_attempted: bool,
+}
 
 static PRIVILEGES_SCRIPTS_DIR: Dir =
     include_dir!("$CARGO_MANIFEST_DIR/src/platform/privileges_scripts");
@@ -68,6 +114,19 @@ extern "C" {
     fn IsCanScreenRecording(_: BOOL) -> BOOL;
     fn CanUseNewApiForScreenCaptureCheck() -> BOOL;
     fn MacCheckAdminAuthorization() -> BOOL;
+    fn MacCollectWindowCandidatesAtPoint(
+        x: f64,
+        y: f64,
+        records: *mut MacWindowCandidateRecord,
+        capacity: usize,
+    ) -> i32;
+    fn MacActivateWindowCandidateAtPoint(
+        x: f64,
+        y: f64,
+        expected_pid: i32,
+        application_activation_attempted: *mut u8,
+        window_raise_attempted: *mut u8,
+    ) -> i32;
     fn MacGetModeNum(display: u32, numModes: *mut u32) -> BOOL;
     fn MacGetModes(
         display: u32,
@@ -86,6 +145,97 @@ extern "C" {
 
 pub fn major_version() -> u32 {
     unsafe { majorVersion() }
+}
+
+fn mac_window_string(bytes: &[u8; MAC_WINDOW_STRING_CAPACITY]) -> String {
+    let length = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..length]).into_owned()
+}
+
+fn optional_mac_window_string(bytes: &[u8; MAC_WINDOW_STRING_CAPACITY]) -> Option<String> {
+    let value = mac_window_string(bytes);
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn mac_activation_policy(value: i32) -> ActivationPolicy {
+    match value {
+        0 => ActivationPolicy::Regular,
+        1 => ActivationPolicy::Accessory,
+        2 => ActivationPolicy::Prohibited,
+        _ => ActivationPolicy::Unknown,
+    }
+}
+
+pub fn collect_window_candidates_at_point(
+    x: i32,
+    y: i32,
+) -> Result<Vec<WindowCandidate>, MacWindowCollectionError> {
+    autoreleasepool(|| {
+        let mut records =
+            [MaybeUninit::<MacWindowCandidateRecord>::uninit(); MAX_MAC_WINDOW_CANDIDATES];
+        let count = unsafe {
+            MacCollectWindowCandidatesAtPoint(
+                x as f64,
+                y as f64,
+                records.as_mut_ptr().cast(),
+                MAX_MAC_WINDOW_CANDIDATES,
+            )
+        };
+        if count < 0 {
+            return Err(MacWindowCollectionError);
+        }
+
+        let count = (count as usize).min(MAX_MAC_WINDOW_CANDIDATES);
+        let mut candidates = Vec::with_capacity(count);
+        for record in records.iter().take(count) {
+            let record = unsafe { record.assume_init() };
+            candidates.push(WindowCandidate {
+                pid: record.pid,
+                window_id: record.window_id,
+                bundle_id: mac_window_string(&record.bundle_id),
+                process_name: mac_window_string(&record.process_name),
+                layer: record.layer,
+                alpha: record.alpha,
+                activation_policy: mac_activation_policy(record.activation_policy),
+                covers_display: record.covers_display != 0,
+                ax_role: optional_mac_window_string(&record.ax_role),
+                ax_subrole: optional_mac_window_string(&record.ax_subrole),
+            });
+        }
+        Ok(candidates)
+    })
+}
+
+pub fn activate_window_candidate_at_point(
+    x: i32,
+    y: i32,
+    expected_pid: i32,
+) -> MacWindowActivationOutcome {
+    autoreleasepool(|| {
+        let mut application_activation_attempted = 0_u8;
+        let mut window_raise_attempted = 0_u8;
+        let result = unsafe {
+            MacActivateWindowCandidateAtPoint(
+                x as f64,
+                y as f64,
+                expected_pid,
+                &mut application_activation_attempted,
+                &mut window_raise_attempted,
+            )
+        };
+        MacWindowActivationOutcome {
+            result,
+            application_activation_attempted: application_activation_attempted != 0,
+            window_raise_attempted: window_raise_attempted != 0,
+        }
+    })
 }
 
 pub fn is_process_trusted(prompt: bool) -> bool {
@@ -303,12 +453,31 @@ fn update_daemon_agent(agent_plist_file: String, update_source_dir: String, sync
 }
 
 fn correct_app_name(s: &str) -> String {
+    let bundle_id = get_bundle_id();
+    let app_name = crate::get_app_name();
+    let full_name = crate::get_full_name();
+    correct_app_name_with_identity(s, bundle_id.as_deref(), &app_name, &full_name)
+}
+
+fn correct_app_name_with_identity(
+    s: &str,
+    bundle_id: Option<&str>,
+    app_name: &str,
+    full_name: &str,
+) -> String {
+    let full_name_placeholder = "__full_name__";
+    let bundle_id_placeholder = "__bundle_id__";
     let mut s = s.to_owned();
-    if let Some(bundleid) = get_bundle_id() {
-        s = s.replace("com.carriez.rustdesk", &bundleid);
+    s = s.replace("com.carriez.RustDesk", full_name_placeholder);
+    if bundle_id.is_some() {
+        s = s.replace("com.carriez.rustdesk", bundle_id_placeholder);
     }
-    s = s.replace("rustdesk", &crate::get_app_name().to_lowercase());
-    s = s.replace("RustDesk", &crate::get_app_name());
+    s = s.replace("rustdesk", &app_name.to_lowercase());
+    s = s.replace("RustDesk", app_name);
+    s = s.replace(full_name_placeholder, full_name);
+    if let Some(bundle_id) = bundle_id {
+        s = s.replace(bundle_id_placeholder, bundle_id);
+    }
     s
 }
 
@@ -1226,5 +1395,24 @@ fn get_bundle_id() -> Option<String> {
             .to_string_lossy()
             .to_string();
         Some(bundle_id_str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::correct_app_name_with_identity;
+
+    #[test]
+    fn correct_app_name_preserves_launchagent_bundle_identifier() {
+        let agent_plist = include_str!("privileges_scripts/agent.plist");
+        let corrected = correct_app_name_with_identity(
+            agent_plist,
+            Some("com.herbin.rustdesk"),
+            "RustDesk-Herbin",
+            "com.herbin.RustDesk-Herbin",
+        );
+
+        assert!(corrected.contains("<string>com.herbin.rustdesk</string>"));
+        assert!(!corrected.contains("com.herbin.rustdesk-herbin"));
     }
 }

@@ -1,10 +1,14 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
 #import <IOKit/hidsystem/IOHIDLib.h>
 #include <Security/Authorization.h>
 #include <Security/AuthorizationTags.h>
 
 #include <CoreGraphics/CoreGraphics.h>
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <vector>
 #include <map>
 #include <set>
@@ -114,6 +118,412 @@ extern "C" bool Elevate(char* process, char** args) {
 
 extern "C" bool MacCheckAdminAuthorization() {
     return Elevate(NULL, NULL);
+}
+
+static int32_t MacFrontmostApplicationPid() {
+    @autoreleasepool {
+        NSRunningApplication *application = [[NSWorkspace sharedWorkspace] frontmostApplication];
+        return application == nil ? -1 : application.processIdentifier;
+    }
+}
+
+static constexpr size_t MAX_MAC_WINDOW_CANDIDATES = 64;
+static constexpr size_t MAC_WINDOW_STRING_CAPACITY = 256;
+
+struct MacWindowCandidateRecord {
+    int32_t pid;
+    uint32_t window_id;
+    int32_t layer;
+    int32_t activation_policy;
+    double alpha;
+    double x;
+    double y;
+    double width;
+    double height;
+    uint8_t covers_display;
+    uint8_t reserved[7];
+    char bundle_id[MAC_WINDOW_STRING_CAPACITY];
+    char process_name[MAC_WINDOW_STRING_CAPACITY];
+    char ax_role[MAC_WINDOW_STRING_CAPACITY];
+    char ax_subrole[MAC_WINDOW_STRING_CAPACITY];
+};
+
+static_assert(sizeof(MacWindowCandidateRecord) == 1088,
+              "MacWindowCandidateRecord must match the Rust C ABI");
+static_assert(sizeof(((MacWindowCandidateRecord *)nullptr)->bundle_id) == 256,
+              "MacWindowCandidateRecord strings must have fixed capacity");
+
+struct MacAccessibilityHit {
+    pid_t pid;
+    CFStringRef role;
+    CFStringRef subrole;
+};
+
+static CFStringRef MacCopyAccessibilityStringAttribute(
+    AXUIElementRef element,
+    CFStringRef attribute
+) {
+    CFTypeRef value = NULL;
+    AXError error = AXUIElementCopyAttributeValue(element, attribute, &value);
+    if (error != kAXErrorSuccess || value == NULL ||
+        CFGetTypeID(value) != CFStringGetTypeID()) {
+        if (value != NULL) {
+            CFRelease(value);
+        }
+        return NULL;
+    }
+    return (CFStringRef)value;
+}
+
+static MacAccessibilityHit MacAccessibilityHitAtPoint(double x, double y) {
+    MacAccessibilityHit hit = {-1, NULL, NULL};
+    AXUIElementRef systemWide = AXUIElementCreateSystemWide();
+    if (systemWide == NULL) {
+        return hit;
+    }
+
+    AXUIElementRef hitElement = NULL;
+    AXError hitError = AXUIElementCopyElementAtPosition(systemWide, x, y, &hitElement);
+    CFRelease(systemWide);
+    if (hitError != kAXErrorSuccess || hitElement == NULL) {
+        if (hitElement != NULL) {
+            CFRelease(hitElement);
+        }
+        return hit;
+    }
+
+    if (AXUIElementGetPid(hitElement, &hit.pid) == kAXErrorSuccess) {
+        hit.role =
+            MacCopyAccessibilityStringAttribute(hitElement, kAXRoleAttribute);
+        hit.subrole =
+            MacCopyAccessibilityStringAttribute(hitElement, kAXSubroleAttribute);
+    }
+    CFRelease(hitElement);
+    return hit;
+}
+
+static void MacReleaseAccessibilityHit(MacAccessibilityHit hit) {
+    if (hit.role != NULL) {
+        CFRelease(hit.role);
+    }
+    if (hit.subrole != NULL) {
+        CFRelease(hit.subrole);
+    }
+}
+
+static void MacCopyString(CFStringRef value, char *destination, size_t capacity) {
+    if (capacity == 0) {
+        return;
+    }
+    destination[0] = '\0';
+    if (value == NULL) {
+        return;
+    }
+
+    CFIndex usedBytes = 0;
+    CFStringGetBytes(
+        value,
+        CFRangeMake(0, CFStringGetLength(value)),
+        kCFStringEncodingUTF8,
+        0,
+        false,
+        reinterpret_cast<UInt8 *>(destination),
+        static_cast<CFIndex>(capacity - 1),
+        &usedBytes);
+    destination[usedBytes] = '\0';
+}
+
+static int32_t MacActivationPolicy(NSRunningApplication *application) {
+    if (application == nil) {
+        return 3;
+    }
+    switch (application.activationPolicy) {
+        case NSApplicationActivationPolicyRegular:
+            return 0;
+        case NSApplicationActivationPolicyAccessory:
+            return 1;
+        case NSApplicationActivationPolicyProhibited:
+            return 2;
+    }
+    return 3;
+}
+
+static std::vector<CGRect> MacDisplayBoundsAtPoint(CGPoint point) {
+    uint32_t displayCount = 0;
+    CGError countError =
+        CGGetDisplaysWithPoint(point, 0, NULL, &displayCount);
+    if (countError != kCGErrorSuccess || displayCount == 0) {
+        return {};
+    }
+
+    std::vector<CGDirectDisplayID> displays(displayCount);
+    CGError displayError = CGGetDisplaysWithPoint(
+        point, displayCount, displays.data(), &displayCount);
+    if (displayError != kCGErrorSuccess) {
+        return {};
+    }
+
+    std::vector<CGRect> displayBounds;
+    displayBounds.reserve(displayCount);
+    for (uint32_t index = 0; index < displayCount; ++index) {
+        displayBounds.push_back(CGDisplayBounds(displays[index]));
+    }
+    return displayBounds;
+}
+
+static bool MacWindowCoversPointDisplay(
+    CGRect windowBounds,
+    const std::vector<CGRect> &pointDisplayBounds
+) {
+    const CGFloat edgeTolerance = 1.0;
+    for (CGRect displayBounds : pointDisplayBounds) {
+        if (CGRectGetMinX(windowBounds) <= CGRectGetMinX(displayBounds) + edgeTolerance &&
+            CGRectGetMinY(windowBounds) <= CGRectGetMinY(displayBounds) + edgeTolerance &&
+            CGRectGetMaxX(windowBounds) >= CGRectGetMaxX(displayBounds) - edgeTolerance &&
+            CGRectGetMaxY(windowBounds) >= CGRectGetMaxY(displayBounds) - edgeTolerance) {
+            return true;
+        }
+    }
+    return false;
+}
+
+extern "C" int32_t MacCollectWindowCandidatesAtPoint(
+    double x,
+    double y,
+    MacWindowCandidateRecord *records,
+    size_t capacity
+) {
+    @autoreleasepool {
+        if (records == NULL || capacity == 0) {
+            return 0;
+        }
+
+        size_t recordLimit = std::min(capacity, MAX_MAC_WINDOW_CANDIDATES);
+        std::memset(records, 0, recordLimit * sizeof(MacWindowCandidateRecord));
+
+        CGWindowListOption options = static_cast<CGWindowListOption>(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements);
+        CFArrayRef windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID);
+        if (windowList == NULL) {
+            return -1;
+        }
+
+        CGPoint point = CGPointMake(x, y);
+        MacAccessibilityHit accessibilityHit = MacAccessibilityHitAtPoint(x, y);
+        std::vector<CGRect> pointDisplayBounds = MacDisplayBoundsAtPoint(point);
+        size_t recordCount = 0;
+        CFIndex windowCount = CFArrayGetCount(windowList);
+        for (CFIndex index = 0;
+             index < windowCount && recordCount < recordLimit;
+             ++index) {
+            NSDictionary *window = (NSDictionary *)CFArrayGetValueAtIndex(windowList, index);
+            NSNumber *alpha = [window objectForKey:(id)kCGWindowAlpha];
+            if (alpha != nil && alpha.doubleValue <= 0.01) {
+                continue;
+            }
+
+            NSDictionary *boundsDictionary = [window objectForKey:(id)kCGWindowBounds];
+            CGRect bounds = CGRectZero;
+            if (boundsDictionary == nil ||
+                !CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)boundsDictionary, &bounds) ||
+                !CGRectContainsPoint(bounds, point)) {
+                continue;
+            }
+
+            NSNumber *owner = [window objectForKey:(id)kCGWindowOwnerPID];
+            if (owner == nil) {
+                continue;
+            }
+            NSRunningApplication *ownerApplication =
+                [NSRunningApplication runningApplicationWithProcessIdentifier:owner.intValue];
+
+            MacWindowCandidateRecord *record = &records[recordCount];
+            NSNumber *windowId = [window objectForKey:(id)kCGWindowNumber];
+            NSNumber *layer = [window objectForKey:(id)kCGWindowLayer];
+            record->pid = owner.intValue;
+            record->window_id = windowId == nil ? 0 : windowId.unsignedIntValue;
+            record->layer = layer == nil ? 0 : layer.intValue;
+            record->activation_policy = MacActivationPolicy(ownerApplication);
+            record->alpha = alpha == nil ? 1.0 : alpha.doubleValue;
+            record->x = bounds.origin.x;
+            record->y = bounds.origin.y;
+            record->width = bounds.size.width;
+            record->height = bounds.size.height;
+            record->covers_display =
+                MacWindowCoversPointDisplay(bounds, pointDisplayBounds) ? 1 : 0;
+
+            MacCopyString(
+                (CFStringRef)ownerApplication.bundleIdentifier,
+                record->bundle_id,
+                MAC_WINDOW_STRING_CAPACITY);
+            NSString *processName = ownerApplication.localizedName;
+            if (processName == nil) {
+                processName = [window objectForKey:(id)kCGWindowOwnerName];
+            }
+            MacCopyString(
+                (CFStringRef)processName,
+                record->process_name,
+                MAC_WINDOW_STRING_CAPACITY);
+
+            if (accessibilityHit.pid == record->pid) {
+                MacCopyString(
+                    accessibilityHit.role,
+                    record->ax_role,
+                    MAC_WINDOW_STRING_CAPACITY);
+                MacCopyString(
+                    accessibilityHit.subrole,
+                    record->ax_subrole,
+                    MAC_WINDOW_STRING_CAPACITY);
+            }
+            ++recordCount;
+        }
+        MacReleaseAccessibilityHit(accessibilityHit);
+        CFRelease(windowList);
+        return static_cast<int32_t>(recordCount);
+    }
+}
+
+static AXUIElementRef MacAccessibilityWindowAtPoint(double x, double y, pid_t expectedPid) {
+    AXUIElementRef systemWide = AXUIElementCreateSystemWide();
+    if (systemWide == NULL) {
+        return NULL;
+    }
+
+    AXUIElementRef hitElement = NULL;
+    AXError hitError = AXUIElementCopyElementAtPosition(systemWide, x, y, &hitElement);
+    CFRelease(systemWide);
+    if (hitError != kAXErrorSuccess || hitElement == NULL) {
+        if (hitElement != NULL) {
+            CFRelease(hitElement);
+        }
+        return NULL;
+    }
+
+    AXUIElementRef windowElement = NULL;
+    CFTypeRef roleValue = NULL;
+    AXError roleError = AXUIElementCopyAttributeValue(hitElement, kAXRoleAttribute, &roleValue);
+    if (roleError == kAXErrorSuccess && roleValue != NULL &&
+        CFGetTypeID(roleValue) == CFStringGetTypeID() &&
+        CFEqual(roleValue, kAXWindowRole)) {
+        windowElement = hitElement;
+        CFRetain(windowElement);
+    }
+    if (roleValue != NULL) {
+        CFRelease(roleValue);
+    }
+
+    if (windowElement == NULL) {
+        CFTypeRef windowValue = NULL;
+        AXError windowError =
+            AXUIElementCopyAttributeValue(hitElement, kAXWindowAttribute, &windowValue);
+        if (windowError == kAXErrorSuccess && windowValue != NULL &&
+            CFGetTypeID(windowValue) == AXUIElementGetTypeID()) {
+            windowElement = (AXUIElementRef)windowValue;
+        } else if (windowValue != NULL) {
+            CFRelease(windowValue);
+        }
+    }
+    CFRelease(hitElement);
+
+    if (windowElement == NULL) {
+        return NULL;
+    }
+
+    pid_t windowPid = -1;
+    if (AXUIElementGetPid(windowElement, &windowPid) != kAXErrorSuccess ||
+        windowPid != expectedPid) {
+        CFRelease(windowElement);
+        return NULL;
+    }
+    return windowElement;
+}
+
+static bool MacAccessibilityWindowNeedsRaise(AXUIElementRef targetWindow, pid_t ownerPid) {
+    if (targetWindow == NULL) {
+        return false;
+    }
+
+    AXUIElementRef applicationElement = AXUIElementCreateApplication(ownerPid);
+    if (applicationElement == NULL) {
+        return false;
+    }
+
+    CFTypeRef focusedWindowValue = NULL;
+    AXError focusedWindowError = AXUIElementCopyAttributeValue(
+        applicationElement, kAXFocusedWindowAttribute, &focusedWindowValue);
+    CFRelease(applicationElement);
+    if (focusedWindowError != kAXErrorSuccess || focusedWindowValue == NULL ||
+        CFGetTypeID(focusedWindowValue) != AXUIElementGetTypeID()) {
+        if (focusedWindowValue != NULL) {
+            CFRelease(focusedWindowValue);
+        }
+        return false;
+    }
+
+    bool needsRaise = !CFEqual(targetWindow, focusedWindowValue);
+    CFRelease(focusedWindowValue);
+    return needsRaise;
+}
+
+extern "C" int32_t MacActivateWindowCandidateAtPoint(
+    double x,
+    double y,
+    int32_t expectedPid,
+    uint8_t *applicationActivationAttempted,
+    uint8_t *windowRaiseAttempted
+) {
+    if (applicationActivationAttempted != NULL) {
+        *applicationActivationAttempted = 0;
+    }
+    if (windowRaiseAttempted != NULL) {
+        *windowRaiseAttempted = 0;
+    }
+
+    @autoreleasepool {
+        if (expectedPid <= 0) {
+            return -1;
+        }
+
+        NSRunningApplication *application =
+            [NSRunningApplication runningApplicationWithProcessIdentifier:expectedPid];
+        if (application == nil || application.terminated) {
+            return -1;
+        }
+        if (application.activationPolicy != NSApplicationActivationPolicyRegular) {
+            return 0;
+        }
+
+        AXUIElementRef targetWindow =
+            MacAccessibilityWindowAtPoint(x, y, expectedPid);
+        bool shouldRaiseWindow =
+            MacAccessibilityWindowNeedsRaise(targetWindow, expectedPid);
+        int32_t frontmostPid = MacFrontmostApplicationPid();
+
+        bool activationSucceeded = true;
+        if (expectedPid != frontmostPid) {
+            if (applicationActivationAttempted != NULL) {
+                *applicationActivationAttempted = 1;
+            }
+            activationSucceeded =
+                [application activateWithOptions:(NSApplicationActivationOptions)0];
+        }
+
+        AXError raiseError = kAXErrorSuccess;
+        if (shouldRaiseWindow) {
+            if (windowRaiseAttempted != NULL) {
+                *windowRaiseAttempted = 1;
+            }
+            raiseError = AXUIElementPerformAction(targetWindow, kAXRaiseAction);
+        }
+        if (targetWindow != NULL) {
+            CFRelease(targetWindow);
+        }
+
+        if (!activationSucceeded || raiseError != kAXErrorSuccess) {
+            return -expectedPid;
+        }
+        return expectedPid != frontmostPid || shouldRaiseWindow ? expectedPid : 0;
+    }
 }
 
 // https://gist.github.com/briankc/025415e25900750f402235dbf1b74e42

@@ -25,6 +25,8 @@ RustDesk welcomes contribution from everyone. See [CONTRIBUTING.md](docs/CONTRIB
 
 [**FAQ**](https://github.com/rustdesk/rustdesk/wiki/FAQ)
 
+[**RUSTDESK-HERBIN CLI GUIDE (中文)**](docs/rdh-cli.md)
+
 [**BINARY DOWNLOAD**](https://github.com/rustdesk/rustdesk/releases)
 
 [**NIGHTLY BUILD**](https://github.com/rustdesk/rustdesk/releases/tag/nightly)
