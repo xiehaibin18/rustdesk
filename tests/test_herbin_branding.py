@@ -790,6 +790,8 @@ def main() -> None:
         "kAXWindowAttribute",
         "AXUIElementGetPid",
         "kAXFocusedWindowAttribute",
+        "kAXFrontmostAttribute",
+        "AXUIElementSetAttributeValue",
         "CFEqual",
         "AXUIElementPerformAction",
         "kAXRaiseAction",
@@ -810,8 +812,12 @@ def main() -> None:
         "builtin.dock-ui",
         "builtin.interactive-transient",
         "builtin.notification-center-overlay",
+        "builtin.security-agent",
     ):
         assert rule_id in window_targeting_rules_rs
+    assert '"com.apple.SecurityAgent"' in window_targeting_rules_rs
+    assert '@"com.apple.SecurityAgent"' in macos_mm
+    assert "NSApplicationActivationPolicyAccessory" in macos_mm
 
     assert_left_mouse_down_contract(input_service_rs)
     assert_default_window_targeting_config(window_targeting_config_rs)

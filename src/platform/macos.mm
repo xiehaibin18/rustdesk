@@ -465,6 +465,23 @@ static bool MacAccessibilityWindowNeedsRaise(AXUIElementRef targetWindow, pid_t 
     return needsRaise;
 }
 
+static bool MacIsSecurityAgentAccessory(NSRunningApplication *application) {
+    return application.activationPolicy == NSApplicationActivationPolicyAccessory &&
+           [application.bundleIdentifier isEqualToString:@"com.apple.SecurityAgent"];
+}
+
+static AXError MacMakeAccessibilityApplicationFrontmost(pid_t ownerPid) {
+    AXUIElementRef applicationElement = AXUIElementCreateApplication(ownerPid);
+    if (applicationElement == NULL) {
+        return kAXErrorFailure;
+    }
+
+    AXError error = AXUIElementSetAttributeValue(
+        applicationElement, kAXFrontmostAttribute, kCFBooleanTrue);
+    CFRelease(applicationElement);
+    return error;
+}
+
 extern "C" int32_t MacActivateWindowCandidateAtPoint(
     double x,
     double y,
@@ -489,7 +506,10 @@ extern "C" int32_t MacActivateWindowCandidateAtPoint(
         if (application == nil || application.terminated) {
             return -1;
         }
-        if (application.activationPolicy != NSApplicationActivationPolicyRegular) {
+        bool isRegularApplication =
+            application.activationPolicy == NSApplicationActivationPolicyRegular;
+        bool isSecurityAgentAccessory = MacIsSecurityAgentAccessory(application);
+        if (!isRegularApplication && !isSecurityAgentAccessory) {
             return 0;
         }
 
@@ -500,7 +520,15 @@ extern "C" int32_t MacActivateWindowCandidateAtPoint(
         int32_t frontmostPid = MacFrontmostApplicationPid();
 
         bool activationSucceeded = true;
-        if (expectedPid != frontmostPid) {
+        AXError accessibilityFrontmostError = kAXErrorSuccess;
+        if (isSecurityAgentAccessory) {
+            // AppKit activation does not transfer AX keyboard focus to an accessory app.
+            if (applicationActivationAttempted != NULL) {
+                *applicationActivationAttempted = 1;
+            }
+            accessibilityFrontmostError =
+                MacMakeAccessibilityApplicationFrontmost(expectedPid);
+        } else if (expectedPid != frontmostPid) {
             if (applicationActivationAttempted != NULL) {
                 *applicationActivationAttempted = 1;
             }
@@ -519,10 +547,14 @@ extern "C" int32_t MacActivateWindowCandidateAtPoint(
             CFRelease(targetWindow);
         }
 
-        if (!activationSucceeded || raiseError != kAXErrorSuccess) {
+        if (!activationSucceeded ||
+            accessibilityFrontmostError != kAXErrorSuccess ||
+            raiseError != kAXErrorSuccess) {
             return -expectedPid;
         }
-        return expectedPid != frontmostPid || shouldRaiseWindow ? expectedPid : 0;
+        return isSecurityAgentAccessory || expectedPid != frontmostPid || shouldRaiseWindow
+            ? expectedPid
+            : 0;
     }
 }
 
