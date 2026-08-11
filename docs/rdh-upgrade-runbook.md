@@ -13,7 +13,10 @@ RDH keeps only these deviations from upstream:
 2. A configurable macOS controlled-side click preprocessor. Ordered rules choose
    `skip`, `forward_only`, or `activate`; only `activate` may order the selected
    regular application or its public-Accessibility window before the original
-   remote left-button-down event.
+   remote left-button-down event. The sole built-in non-regular activation case
+   is the exact `com.apple.SecurityAgent` accessory application, whose public AX
+   frontmost attribute is set before mouse-down to preserve authorization-dialog
+   keyboard focus.
 3. A dedicated ad-hoc-signed macOS CI build until Developer ID signing is available.
 4. A launchd-gated macOS `--server` memory watchdog that checks once daily at
    06:00 and restarts an over-limit server within the unattended window.
@@ -243,6 +246,9 @@ Review the patch for:
 - only `activate` uses public Accessibility/AppKit ordering APIs, validates the AX
   window PID against the selected CoreGraphics owner PID, and avoids re-raising an
   already focused AX window;
+- the SecurityAgent exception matches only `com.apple.SecurityAgent` with
+  accessory activation policy and uses `kAXFrontmostAttribute`; other accessory
+  applications remain conservative;
 - `_AXUIElementGetWindow`, `CGSOrderWindow`, and SkyLight remain absent;
 - file watching remains absent; configuration changes occur only through explicit
   `status`, `validate`, and `reload` management operations;
@@ -300,6 +306,9 @@ Test from an official Windows controller and from iPhone/iPad mouse mode:
   order change;
 - click between two windows of the same application and confirm the clicked window
   becomes frontmost without changing the menu-bar application;
+- trigger one bounded Keychain authorization request, remotely click its text and
+  password field, and confirm keyboard focus remains inside the SecurityAgent
+  dialog without activating the requesting application underneath;
 - open a Finder menu and select an item; the menu must remain interactive without
   pre-activating the window below it;
 - open a Finder toolbar popover and interact with it without dismissing it through

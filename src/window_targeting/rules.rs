@@ -161,6 +161,15 @@ fn built_in_rules() -> Vec<CompiledRule> {
             },
         ),
         CompiledRule::new(
+            "builtin.security-agent",
+            WindowTargetAction::Activate,
+            RuleMatcher {
+                bundle_ids: vec!["com.apple.SecurityAgent".to_owned()],
+                activation_policies: vec![ActivationPolicy::Accessory],
+                ..RuleMatcher::default()
+            },
+        ),
+        CompiledRule::new(
             "builtin.dock-transparent-cover",
             WindowTargetAction::Skip,
             RuleMatcher {
@@ -346,6 +355,23 @@ mod tests {
             decide(&config, &candidates).action,
             WindowTargetAction::Activate
         );
+    }
+
+    #[test]
+    fn security_agent_accessory_window_activates() {
+        let config = compile_effective(None);
+        let candidates = vec![candidate(
+            1727,
+            "com.apple.SecurityAgent",
+            1000,
+            ActivationPolicy::Accessory,
+            Some("AXStaticText"),
+            false,
+        )];
+        let decision = decide(&config, &candidates);
+        assert_eq!(decision.action, WindowTargetAction::Activate);
+        assert_eq!(decision.candidate_index, Some(0));
+        assert_eq!(decision.rule_id, "builtin.security-agent");
     }
 
     #[test]

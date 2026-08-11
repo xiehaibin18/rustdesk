@@ -18,6 +18,11 @@
 
 - The controlled Mac resolves the visible application under the cursor before a
   remote left-button-down event and asks AppKit to activate regular applications.
+- A precisely identified `com.apple.SecurityAgent` accessory window is the sole
+  non-regular activation exception. RDH sets its public Accessibility
+  `kAXFrontmostAttribute` before the original mouse-down so keyboard focus stays
+  with the authorization dialog while the requesting application remains the
+  AppKit frontmost application.
 - Dock-owned windows and non-regular overlay applications are ignored.
 - Activation remains best effort: failure is logged at debug level and the mouse
   click is still delivered.
