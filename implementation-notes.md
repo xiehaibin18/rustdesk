@@ -56,9 +56,10 @@
 
 ## OSS management API boundary
 
-- Automatic `/api/heartbeat` and `/api/sysinfo` synchronization starts only when
-  `api-server` is explicitly configured. A custom rendezvous server by itself no
-  longer implies that the closed Server Pro management API exists on port 21114.
+- Automatic `/api/heartbeat`, `/api/sysinfo`, and `/api/audit/*` traffic starts
+  only when `api-server` is explicitly configured. A custom rendezvous server by
+  itself no longer implies that the closed Server Pro management API exists on
+  port 21114.
 - This gate does not change the native hbbs registration/heartbeat protocol,
   direct connections, hole punching, or hbbr relay traffic.
 - An explicitly configured private API server retains the upstream device

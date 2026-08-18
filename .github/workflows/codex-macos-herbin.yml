@@ -119,6 +119,10 @@ jobs:
       - name: Test RDH focused contracts
         run: |
           MACOSX_DEPLOYMENT_TARGET=10.14 \
+            cargo test --locked --lib common::tests::custom_rendezvous_without_explicit_api_does_not_enable_audit \
+              --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \
+              -- --exact --nocapture
+          MACOSX_DEPLOYMENT_TARGET=10.14 \
             cargo test --locked --lib hbbs_http::sync::tests \
               --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \
               -- --nocapture

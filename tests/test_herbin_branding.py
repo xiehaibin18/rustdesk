@@ -422,8 +422,14 @@ def assert_headless_file_transfer_ci_and_docs_contract(
 def assert_management_sync_ci_and_docs_contract(
     macos_workflow: str, upgrade_runbook: str, implementation_notes: str
 ) -> None:
+    audit_test = (
+        "cargo test --locked --lib "
+        "common::tests::custom_rendezvous_without_explicit_api_does_not_enable_audit"
+    )
     management_sync_test = "cargo test --locked --lib hbbs_http::sync::tests"
+    assert audit_test in macos_workflow
     assert management_sync_test in macos_workflow
+    assert macos_workflow.index(audit_test) < macos_workflow.index(management_sync_test)
     assert macos_workflow.index(management_sync_test) < macos_workflow.index(
         "cargo test --locked --lib rdh_cli"
     )
