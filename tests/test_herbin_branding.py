@@ -437,6 +437,7 @@ def assert_management_sync_ci_and_docs_contract(
 
 
 def assert_macos_candidate_signing_contract(macos_workflow: str) -> None:
+    assert "python3 tests/test_macos_signing_promotion.py" in macos_workflow
     assert 'echo "installable=false"' in macos_workflow
     assert 'echo "requires_local_signing_promotion=true"' in macos_workflow
     assert "Installable: \\`no\\`" in macos_workflow

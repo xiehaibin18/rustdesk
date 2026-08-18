@@ -72,6 +72,9 @@
   promoted app must retain bundle ID `com.herbin.rustdesk`, the approved
   entitlements, the expected Team ID, and the same certificate-based Designated
   Requirement as the baseline app.
+* Use `res/rdh-macos-signing-policy.sh --promote` as the canonical local
+  promotion entrypoint. Do not reproduce its signing sequence with an ad hoc
+  command chain or install its input DMG.
 * Fail closed if the install candidate is ad-hoc signed, has no Team ID, uses a
   different Team ID or Designated Requirement, or lacks promotion metadata. A
   valid deep signature alone does not prove signing continuity.

@@ -54,6 +54,7 @@ jobs:
 
       - name: Verify RDH patch invariants
         run: |
+          python3 tests/test_macos_signing_promotion.py
           python3 tests/test_herbin_branding.py
           git diff --check
 

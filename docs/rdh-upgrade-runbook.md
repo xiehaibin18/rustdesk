@@ -326,6 +326,23 @@ Package the promoted app into a new DMG with its own checksum. Never overwrite o
 rename the CI DMG in place, and never treat the promoted local-development build as
 a Developer ID/notarized distribution artifact.
 
+Use the checked-in promotion entrypoint rather than reconstructing the signing
+order manually:
+
+```bash
+res/rdh-macos-signing-policy.sh --promote \
+  --input-dmg "$CI_DMG" \
+  --input-sha256 "$CI_DMG_SHA256" \
+  --input-metadata "$CI_METADATA" \
+  --baseline-app "$APPLE_DEVELOPMENT_BASELINE_APP" \
+  --identity "$APPLE_DEVELOPMENT_IDENTITY_SHA1" \
+  --output-dir "$PROMOTED_OUTPUT_DIR"
+```
+
+The output directory must be a new path under `/Volumes/DevData`. Preserve it as
+installation evidence. Re-run `--check-reports` on the generated baseline and
+candidate reports before accepting the promoted metadata.
+
 ## 6. Protect the active remote session
 
 Never replace RDH while it is the only working route into the Mac.

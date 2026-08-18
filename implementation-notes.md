@@ -41,6 +41,9 @@
   the approved entitlements and must reproduce the certificate-based Designated
   Requirement of the last known-good RDH app. The promoted artifact alone may be
   marked `installable=true`.
+- `res/rdh-macos-signing-policy.sh --promote` is the canonical local entrypoint.
+  Its report policy fails closed on ad-hoc signatures and bundle, Team ID,
+  Designated Requirement, or entitlement drift before producing a separate DMG.
 - A direct ad-hoc rdh.23 installation demonstrated why this gate is required:
   `tccd` rejected the existing Screen Capture and Listen Event grants because
   their stored Apple Development code requirement no longer matched the ad-hoc
