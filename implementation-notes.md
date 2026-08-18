@@ -32,9 +32,19 @@
 ## Build and distribution
 
 - macOS builds remain CI-first through `.github/workflows/codex-macos-herbin.yml`.
-- Until a Developer ID certificate is available, artifacts are ad-hoc signed and
-  are not notarized. The workflow verifies signature integrity but does not claim
-  Gatekeeper acceptance.
+- Until a Developer ID certificate is available, CI artifacts are ad-hoc signed,
+  not notarized, and explicitly marked `installable=false`. The workflow proves
+  build and signature integrity only; it does not produce the persistent-host
+  installation candidate.
+- Before local installation, the verified CI artifact must be promoted with the
+  existing Apple Development identity for Team `7373GRMT82`. Promotion preserves
+  the approved entitlements and must reproduce the certificate-based Designated
+  Requirement of the last known-good RDH app. The promoted artifact alone may be
+  marked `installable=true`.
+- A direct ad-hoc rdh.23 installation demonstrated why this gate is required:
+  `tccd` rejected the existing Screen Capture and Listen Event grants because
+  their stored Apple Development code requirement no longer matched the ad-hoc
+  cdhash requirement. Bundle ID and entitlements had not changed.
 - Artifact versions use `<upstream>-rdh.<revision>` while the application keeps
   the upstream protocol/application version.
 - The upgrade rehearsal workflow never merges or installs automatically. It only

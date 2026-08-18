@@ -436,6 +436,13 @@ def assert_management_sync_ci_and_docs_contract(
     assert "port 21114" in upgrade_runbook
 
 
+def assert_macos_candidate_signing_contract(macos_workflow: str) -> None:
+    assert 'echo "installable=false"' in macos_workflow
+    assert 'echo "requires_local_signing_promotion=true"' in macos_workflow
+    assert "Installable: \\`no\\`" in macos_workflow
+    assert "Local signing promotion required: \\`yes\\`" in macos_workflow
+
+
 def assert_headless_file_transfer_modules_contract(
     file_completion_rs: str,
     file_error_rs: str,
@@ -725,6 +732,7 @@ def main() -> None:
     assert_management_sync_ci_and_docs_contract(
         macos_workflow, upgrade_runbook, implementation_notes
     )
+    assert_macos_candidate_signing_contract(macos_workflow)
     assert_headless_file_transfer_modules_contract(
         file_completion_rs,
         file_error_rs,

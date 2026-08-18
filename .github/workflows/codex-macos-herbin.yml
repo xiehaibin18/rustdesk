@@ -196,6 +196,8 @@ jobs:
             echo "rdh_revision=$RDH_REVISION"
             echo "source_commit=$SOURCE_COMMIT"
             echo "signature=ad-hoc"
+            echo "installable=false"
+            echo "requires_local_signing_promotion=true"
             echo "notarized=false"
           } > rdh-build-metadata.txt
 
@@ -217,5 +219,7 @@ jobs:
             echo "- RDH revision: \`${RDH_REVISION}\`"
             echo "- Artifact: \`rustdesk-herbin-${VERSION}-aarch64.dmg\`"
             echo "- Signature: ad-hoc (not notarized; Gatekeeper acceptance is not claimed)"
+            echo "- Installable: \`no\`"
+            echo "- Local signing promotion required: \`yes\`"
             echo "- Source: \`${SOURCE_COMMIT}\`"
           } >> "$GITHUB_STEP_SUMMARY"
