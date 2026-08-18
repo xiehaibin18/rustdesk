@@ -1135,6 +1135,9 @@ pub fn get_local_option(key: &str) -> String {
 }
 
 pub fn get_audit_server(api: String, custom: String, typ: String) -> String {
+    if api.is_empty() {
+        return "".to_owned();
+    }
     let url = get_api_server(api, custom);
     if url.is_empty() || is_public(&url) {
         return "".to_owned();
@@ -2834,6 +2837,42 @@ mod tests {
             "not a url",
             "https://admin.example.com"
         ));
+    }
+
+    #[test]
+    fn custom_rendezvous_without_explicit_api_does_not_enable_audit() {
+        assert_eq!(
+            "",
+            get_audit_server(
+                "".to_owned(),
+                "custom.example.test:21116".to_owned(),
+                "conn".to_owned(),
+            )
+        );
+    }
+
+    #[test]
+    fn explicit_private_api_enables_audit() {
+        assert_eq!(
+            "https://api.example.test/api/audit/conn",
+            get_audit_server(
+                "https://api.example.test".to_owned(),
+                "custom.example.test:21116".to_owned(),
+                "conn".to_owned(),
+            )
+        );
+    }
+
+    #[test]
+    fn public_api_does_not_enable_audit() {
+        assert_eq!(
+            "",
+            get_audit_server(
+                "https://admin.rustdesk.com".to_owned(),
+                "".to_owned(),
+                "conn".to_owned(),
+            )
+        );
     }
 
     #[test]

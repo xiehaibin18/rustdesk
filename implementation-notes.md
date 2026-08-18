@@ -32,14 +32,38 @@
 ## Build and distribution
 
 - macOS builds remain CI-first through `.github/workflows/codex-macos-herbin.yml`.
-- Until a Developer ID certificate is available, artifacts are ad-hoc signed and
-  are not notarized. The workflow verifies signature integrity but does not claim
-  Gatekeeper acceptance.
+- Until a Developer ID certificate is available, CI artifacts are ad-hoc signed,
+  not notarized, and explicitly marked `installable=false`. The workflow proves
+  build and signature integrity only; it does not produce the persistent-host
+  installation candidate.
+- Before local installation, the verified CI artifact must be promoted with the
+  existing Apple Development identity for Team `7373GRMT82`. Promotion preserves
+  the approved entitlements and must reproduce the certificate-based Designated
+  Requirement of the last known-good RDH app. The promoted artifact alone may be
+  marked `installable=true`.
+- `res/rdh-macos-signing-policy.sh --promote` is the canonical local entrypoint.
+  Its report policy fails closed on ad-hoc signatures and bundle, Team ID,
+  Designated Requirement, or entitlement drift before producing a separate DMG.
+- A direct ad-hoc rdh.23 installation demonstrated why this gate is required:
+  `tccd` rejected the existing Screen Capture and Listen Event grants because
+  their stored Apple Development code requirement no longer matched the ad-hoc
+  cdhash requirement. Bundle ID and entitlements had not changed.
 - Artifact versions use `<upstream>-rdh.<revision>` while the application keeps
   the upstream protocol/application version.
 - The upgrade rehearsal workflow never merges or installs automatically. It only
   checks the latest official release, rehearses the merge in an ephemeral runner,
   and runs the RDH static invariants.
+
+## OSS management API boundary
+
+- Automatic `/api/heartbeat`, `/api/sysinfo`, and `/api/audit/*` traffic starts
+  only when `api-server` is explicitly configured. A custom rendezvous server by
+  itself no longer implies that the closed Server Pro management API exists on
+  port 21114.
+- This gate does not change the native hbbs registration/heartbeat protocol,
+  direct connections, hole punching, or hbbr relay traffic.
+- An explicitly configured private API server retains the upstream device
+  inventory, connection reporting, remote disconnect, and strategy behavior.
 
 ## macOS user-server memory recovery
 

@@ -1,9 +1,10 @@
 # RustDesk-Herbin upgrade runbook
 
 This runbook upgrades RDH to an official stable RustDesk tag while preserving the
-small RDH patch set. Builds happen in GitHub Actions. The procedure never replaces
-the running application until a candidate artifact and a recovery connection both
-exist.
+small RDH patch set. Builds happen in GitHub Actions, but the ad-hoc CI artifact is
+build-only and must be promoted locally to the existing Apple Development signing
+identity before installation. The procedure never replaces the running application
+until a promoted candidate and a recovery connection both exist.
 
 ## Patch contract
 
@@ -18,8 +19,14 @@ RDH keeps only these deviations from upstream:
    frontmost attribute is set before mouse-down to preserve authorization-dialog
    keyboard focus.
 3. A dedicated ad-hoc-signed macOS CI build until Developer ID signing is available.
+   Its artifact is never directly installable: a persistent RDH host requires local
+   Apple Development promotion with Team ID and Designated Requirement continuity.
 4. A launchd-gated macOS `--server` memory watchdog that checks once daily at
    06:00 and restarts an over-limit server within the unattended window.
+5. An OSS management boundary that starts HTTP `/api/heartbeat`, `/api/sysinfo`,
+   and `/api/audit/*` traffic only when `api-server` is explicitly configured. A
+   custom rendezvous server alone must keep native hbbs/hbbr traffic without
+   deriving a Server Pro API on port 21114.
 
 Dock and interactive transient UI, including non-zero-layer menus and popovers,
 must not be blanket-filtered. Passive Notification Center overlay recognition
@@ -281,10 +288,62 @@ gh workflow run codex-macos-herbin.yml \
 
 Use `gh run list` and `gh run view --json status,conclusion,url` to inspect the
 result. The artifact contains the DMG, SHA-256 file, and build metadata. While RDH
-uses ad-hoc signing, `codesign --verify --deep --strict` must pass but Gatekeeper
-acceptance is not expected.
+uses ad-hoc signing in CI, `codesign --verify --deep --strict` must pass but
+Gatekeeper acceptance is not expected. The metadata must also contain
+`installable=false` and `requires_local_signing_promotion=true`. Never install this
+DMG directly on a host whose TCC grants belong to a certificate-signed RDH app.
 
-## 5. Protect the active remote session
+## 5. Promote the build-only artifact for local installation
+
+Promotion is a local private-key operation, not a CI step. Preserve the downloaded
+ad-hoc app as the immutable source, copy it into a task-owned working directory,
+then sign every nested Mach-O/framework and the outer app with the same Apple
+Development identity as the last known-good RDH installation. Use the checked-in
+release entitlements plus the required library-validation exception.
+
+Choose the signing baseline before touching the candidate:
+
+- Prefer the currently installed app only when it has the expected non-empty Team
+  ID and a certificate-based Designated Requirement.
+- If the installed app is ad-hoc or otherwise drifted, use the newest independently
+  verified Apple Development-signed rollback app.
+- Record the baseline Team ID and `codesign -dr -` output. For the current local
+  signing lineage, the expected Team ID is `7373GRMT82`.
+
+The promoted candidate must pass all of these gates:
+
+- bundle ID is exactly `com.herbin.rustdesk`;
+- `codesign --verify --deep --strict` succeeds;
+- signature is not ad-hoc and Team ID equals the baseline;
+- candidate and baseline Designated Requirements are byte-for-byte identical;
+- candidate and baseline app entitlements are identical;
+- source commit, input DMG SHA-256, signing identity SHA-1, Team ID, and requirement
+  digests are recorded in promotion metadata;
+- promotion metadata says `signature=apple-development`, `installable=true`, and
+  `notarized=false`.
+
+Package the promoted app into a new DMG with its own checksum. Never overwrite or
+rename the CI DMG in place, and never treat the promoted local-development build as
+a Developer ID/notarized distribution artifact.
+
+Use the checked-in promotion entrypoint rather than reconstructing the signing
+order manually:
+
+```bash
+res/rdh-macos-signing-policy.sh --promote \
+  --input-dmg "$CI_DMG" \
+  --input-sha256 "$CI_DMG_SHA256" \
+  --input-metadata "$CI_METADATA" \
+  --baseline-app "$APPLE_DEVELOPMENT_BASELINE_APP" \
+  --identity "$APPLE_DEVELOPMENT_IDENTITY_SHA1" \
+  --output-dir "$PROMOTED_OUTPUT_DIR"
+```
+
+The output directory must be a new path under `/Volumes/DevData`. Preserve it as
+installation evidence. Re-run `--check-reports` on the generated baseline and
+candidate reports before accepting the promoted metadata.
+
+## 6. Protect the active remote session
 
 Never replace RDH while it is the only working route into the Mac.
 
@@ -292,13 +351,14 @@ Before installation:
 
 1. Start official RustDesk and prove that a separate controller can reconnect to it.
 2. Keep the previous known-good RDH DMG and checksum available outside `/Applications`.
-3. Verify the candidate checksum and signature.
+3. Verify the promoted candidate checksum, signature, Team ID, Designated
+   Requirement continuity, entitlements, and `installable=true` metadata.
 4. Record the current RDH ID and confirm that its config directory remains
    `$HOME/Library/Preferences/com.herbin.RustDesk-Herbin`.
 
 Only then install the candidate. Do not delete the previous release artifact.
 
-## 6. Runtime acceptance
+## 7. Runtime acceptance
 
 Test from an official Windows controller and from iPhone/iPad mouse mode:
 
@@ -327,8 +387,10 @@ Test from an official Windows controller and from iPhone/iPad mouse mode:
 - repeat with AltTab and DockDoor running;
 - disconnect and reconnect once;
 - confirm Screen Recording, Accessibility, and Input Monitoring remain effective.
+- inspect bounded `tccd` logs and confirm there is no `Failed to match existing
+  code requirement` event for RDH Screen Capture or Listen Event access.
 
-## 7. Promote or roll back
+## 8. Promote or roll back
 
 After acceptance, fast-forward the fork's `master` branch to the candidate and tag
 the deployed artifact as `rdh-<upstream>.1`:

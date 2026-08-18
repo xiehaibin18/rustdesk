@@ -61,6 +61,31 @@
 * Do not make formatting-only changes.
 * Keep naming/style consistent with nearby code.
 
+## RDH macOS Signing and Installation
+
+* Treat `.github/workflows/codex-macos-herbin.yml` artifacts as ad-hoc-signed,
+  build-only inputs. They are never directly installable on a persistent RDH
+  host because replacing a certificate-signed app with ad-hoc code changes its
+  Designated Requirement and invalidates matching TCC grants.
+* Before installation, promote the verified CI artifact locally with the same
+  Apple Development identity as the last known-good RDH installation. The
+  promoted app must retain bundle ID `com.herbin.rustdesk`, the approved
+  entitlements, the expected Team ID, and the same certificate-based Designated
+  Requirement as the baseline app.
+* Use `res/rdh-macos-signing-policy.sh --promote` as the canonical local
+  promotion entrypoint. Do not reproduce its signing sequence with an ad hoc
+  command chain or install its input DMG.
+* Fail closed if the install candidate is ad-hoc signed, has no Team ID, uses a
+  different Team ID or Designated Requirement, or lacks promotion metadata. A
+  valid deep signature alone does not prove signing continuity.
+* If the currently installed RDH is already ad-hoc because of a failed rollout,
+  use the newest independently verified Apple Development-signed rollback app as
+  the signing baseline; never legitimize the broken current identity.
+* Keep the official RustDesk route connected while signing, swapping, refreshing
+  RDH launchd jobs, and validating Screen Recording, Accessibility, and Input
+  Monitoring. Source build, local signing promotion, installation, and real
+  remote acceptance are separate evidence layers.
+
 ## Localization (`src/lang/*.rs`)
 
 Each file is a `HashMap<key, translation>`. Layout:

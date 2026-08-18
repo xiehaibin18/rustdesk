@@ -54,6 +54,7 @@ jobs:
 
       - name: Verify RDH patch invariants
         run: |
+          python3 tests/test_macos_signing_promotion.py
           python3 tests/test_herbin_branding.py
           git diff --check
 
@@ -115,8 +116,16 @@ jobs:
             exit 1
           fi
 
-      - name: Test RDH headless CLIs
+      - name: Test RDH focused contracts
         run: |
+          MACOSX_DEPLOYMENT_TARGET=10.14 \
+            cargo test --locked --lib common::tests::custom_rendezvous_without_explicit_api_does_not_enable_audit \
+              --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \
+              -- --exact --nocapture
+          MACOSX_DEPLOYMENT_TARGET=10.14 \
+            cargo test --locked --lib hbbs_http::sync::tests \
+              --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \
+              -- --nocapture
           MACOSX_DEPLOYMENT_TARGET=10.14 \
             cargo test --locked --lib rdh_cli \
               --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \
@@ -192,6 +201,8 @@ jobs:
             echo "rdh_revision=$RDH_REVISION"
             echo "source_commit=$SOURCE_COMMIT"
             echo "signature=ad-hoc"
+            echo "installable=false"
+            echo "requires_local_signing_promotion=true"
             echo "notarized=false"
           } > rdh-build-metadata.txt
 
@@ -213,5 +224,7 @@ jobs:
             echo "- RDH revision: \`${RDH_REVISION}\`"
             echo "- Artifact: \`rustdesk-herbin-${VERSION}-aarch64.dmg\`"
             echo "- Signature: ad-hoc (not notarized; Gatekeeper acceptance is not claimed)"
+            echo "- Installable: \`no\`"
+            echo "- Local signing promotion required: \`yes\`"
             echo "- Source: \`${SOURCE_COMMIT}\`"
           } >> "$GITHUB_STEP_SUMMARY"

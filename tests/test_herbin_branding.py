@@ -378,7 +378,7 @@ def assert_headless_file_transfer_contract(
 def assert_headless_file_transfer_ci_and_docs_contract(
     macos_workflow: str, upgrade_runbook: str, implementation_notes: str
 ) -> None:
-    assert macos_workflow.count("- name: Test RDH headless CLIs") == 1
+    assert macos_workflow.count("- name: Test RDH focused contracts") == 1
     for command in (
         "cargo test --locked --lib rdh_cli",
         "cargo test --locked --lib headless_file_transfer",
@@ -417,6 +417,37 @@ def assert_headless_file_transfer_ci_and_docs_contract(
 
     assert "## macOS headless file transfer CLI" in implementation_notes
     assert "Open questions: none" in implementation_notes
+
+
+def assert_management_sync_ci_and_docs_contract(
+    macos_workflow: str, upgrade_runbook: str, implementation_notes: str
+) -> None:
+    audit_test = (
+        "cargo test --locked --lib "
+        "common::tests::custom_rendezvous_without_explicit_api_does_not_enable_audit"
+    )
+    management_sync_test = "cargo test --locked --lib hbbs_http::sync::tests"
+    assert audit_test in macos_workflow
+    assert management_sync_test in macos_workflow
+    assert macos_workflow.index(audit_test) < macos_workflow.index(management_sync_test)
+    assert macos_workflow.index(management_sync_test) < macos_workflow.index(
+        "cargo test --locked --lib rdh_cli"
+    )
+
+    assert "OSS management API boundary" in implementation_notes
+    assert "api-server" in implementation_notes
+    assert "port 21114" in implementation_notes
+    assert "OSS management boundary" in upgrade_runbook
+    assert "api-server" in upgrade_runbook
+    assert "port 21114" in upgrade_runbook
+
+
+def assert_macos_candidate_signing_contract(macos_workflow: str) -> None:
+    assert "python3 tests/test_macos_signing_promotion.py" in macos_workflow
+    assert 'echo "installable=false"' in macos_workflow
+    assert 'echo "requires_local_signing_promotion=true"' in macos_workflow
+    assert "Installable: \\`no\\`" in macos_workflow
+    assert "Local signing promotion required: \\`yes\\`" in macos_workflow
 
 
 def assert_headless_file_transfer_modules_contract(
@@ -705,6 +736,10 @@ def main() -> None:
     assert_headless_file_transfer_ci_and_docs_contract(
         macos_workflow, upgrade_runbook, implementation_notes
     )
+    assert_management_sync_ci_and_docs_contract(
+        macos_workflow, upgrade_runbook, implementation_notes
+    )
+    assert_macos_candidate_signing_contract(macos_workflow)
     assert_headless_file_transfer_modules_contract(
         file_completion_rs,
         file_error_rs,
