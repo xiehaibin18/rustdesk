@@ -115,8 +115,12 @@ jobs:
             exit 1
           fi
 
-      - name: Test RDH headless CLIs
+      - name: Test RDH focused contracts
         run: |
+          MACOSX_DEPLOYMENT_TARGET=10.14 \
+            cargo test --locked --lib hbbs_http::sync::tests \
+              --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \
+              -- --nocapture
           MACOSX_DEPLOYMENT_TARGET=10.14 \
             cargo test --locked --lib rdh_cli \
               --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \

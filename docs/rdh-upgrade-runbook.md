@@ -20,6 +20,10 @@ RDH keeps only these deviations from upstream:
 3. A dedicated ad-hoc-signed macOS CI build until Developer ID signing is available.
 4. A launchd-gated macOS `--server` memory watchdog that checks once daily at
    06:00 and restarts an over-limit server within the unattended window.
+5. An OSS management boundary that starts HTTP `/api/heartbeat` and `/api/sysinfo`
+   synchronization only when `api-server` is explicitly configured. A custom
+   rendezvous server alone must keep native hbbs/hbbr traffic without deriving a
+   Server Pro API on port 21114.
 
 Dock and interactive transient UI, including non-zero-layer menus and popovers,
 must not be blanket-filtered. Passive Notification Center overlay recognition

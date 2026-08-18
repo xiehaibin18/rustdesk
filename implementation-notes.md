@@ -41,6 +41,16 @@
   checks the latest official release, rehearses the merge in an ephemeral runner,
   and runs the RDH static invariants.
 
+## OSS management API boundary
+
+- Automatic `/api/heartbeat` and `/api/sysinfo` synchronization starts only when
+  `api-server` is explicitly configured. A custom rendezvous server by itself no
+  longer implies that the closed Server Pro management API exists on port 21114.
+- This gate does not change the native hbbs registration/heartbeat protocol,
+  direct connections, hole punching, or hbbr relay traffic.
+- An explicitly configured private API server retains the upstream device
+  inventory, connection reporting, remote disconnect, and strategy behavior.
+
 ## macOS user-server memory recovery
 
 - The RDH `--server` now contains a low-frequency RSS watchdog with a 1 GiB default

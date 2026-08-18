@@ -274,10 +274,17 @@ async fn start_hbbs_sync_async() {
 }
 
 fn heartbeat_url() -> String {
-    let url = crate::common::get_api_server(
-        Config::get_option("api-server"),
-        Config::get_option("custom-rendezvous-server"),
-    );
+    let api_server = Config::get_option("api-server");
+    let custom_rendezvous_server = Config::get_option("custom-rendezvous-server");
+    heartbeat_url_from_options(&api_server, &custom_rendezvous_server)
+}
+
+fn heartbeat_url_from_options(api_server: &str, custom_rendezvous_server: &str) -> String {
+    if api_server.is_empty() {
+        return "".to_owned();
+    }
+    let url =
+        crate::common::get_api_server(api_server.to_owned(), custom_rendezvous_server.to_owned());
     if url.is_empty() || crate::is_public(&url) {
         return "".to_owned();
     }
@@ -301,6 +308,35 @@ fn handle_config_options(config_options: HashMap<String, String>) {
         })
         .count();
     Config::set_options(options);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::heartbeat_url_from_options;
+
+    #[test]
+    fn custom_rendezvous_without_explicit_api_does_not_start_management_sync() {
+        assert_eq!(
+            "",
+            heartbeat_url_from_options("", "custom.example.test:21116")
+        );
+    }
+
+    #[test]
+    fn explicit_private_api_starts_management_sync() {
+        assert_eq!(
+            "https://api.example.test/api/heartbeat",
+            heartbeat_url_from_options("https://api.example.test", "custom.example.test:21116")
+        );
+    }
+
+    #[test]
+    fn public_api_does_not_start_management_sync() {
+        assert_eq!(
+            "",
+            heartbeat_url_from_options("https://admin.rustdesk.com", "")
+        );
+    }
 }
 
 #[allow(unused)]

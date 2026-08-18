@@ -378,7 +378,7 @@ def assert_headless_file_transfer_contract(
 def assert_headless_file_transfer_ci_and_docs_contract(
     macos_workflow: str, upgrade_runbook: str, implementation_notes: str
 ) -> None:
-    assert macos_workflow.count("- name: Test RDH headless CLIs") == 1
+    assert macos_workflow.count("- name: Test RDH focused contracts") == 1
     for command in (
         "cargo test --locked --lib rdh_cli",
         "cargo test --locked --lib headless_file_transfer",
@@ -417,6 +417,23 @@ def assert_headless_file_transfer_ci_and_docs_contract(
 
     assert "## macOS headless file transfer CLI" in implementation_notes
     assert "Open questions: none" in implementation_notes
+
+
+def assert_management_sync_ci_and_docs_contract(
+    macos_workflow: str, upgrade_runbook: str, implementation_notes: str
+) -> None:
+    management_sync_test = "cargo test --locked --lib hbbs_http::sync::tests"
+    assert management_sync_test in macos_workflow
+    assert macos_workflow.index(management_sync_test) < macos_workflow.index(
+        "cargo test --locked --lib rdh_cli"
+    )
+
+    assert "OSS management API boundary" in implementation_notes
+    assert "api-server" in implementation_notes
+    assert "port 21114" in implementation_notes
+    assert "OSS management boundary" in upgrade_runbook
+    assert "api-server" in upgrade_runbook
+    assert "port 21114" in upgrade_runbook
 
 
 def assert_headless_file_transfer_modules_contract(
@@ -703,6 +720,9 @@ def main() -> None:
         message_proto,
     )
     assert_headless_file_transfer_ci_and_docs_contract(
+        macos_workflow, upgrade_runbook, implementation_notes
+    )
+    assert_management_sync_ci_and_docs_contract(
         macos_workflow, upgrade_runbook, implementation_notes
     )
     assert_headless_file_transfer_modules_contract(
